@@ -20,6 +20,20 @@ const BASE_STYLE: maplibregl.StyleSpecification = {
   layers: [{ id: "osm", type: "raster", source: "osm" }],
 };
 
+// Choroplèthe des prix DVF : rampe séquentielle mono-teinte (violet de la charte),
+// validée clair→foncé sur fond OSM. Bornes calées sur les quartiles DVF observés.
+const PRIX_COLORS = ["#BE8DD8", "#A265C2", "#8542A8", "#672B8B", "#4B1965"];
+const PRIX_BREAKS = [2500, 3500, 4500, 6000]; // €/m²
+export const PRIX_CLASSES = PRIX_COLORS.map((c, i) => ({
+  couleur: c,
+  libelle:
+    i === 0
+      ? `< ${PRIX_BREAKS[0].toLocaleString("fr-FR")}`
+      : i === PRIX_COLORS.length - 1
+        ? `≥ ${PRIX_BREAKS[i - 1].toLocaleString("fr-FR")}`
+        : `${PRIX_BREAKS[i - 1].toLocaleString("fr-FR")} – ${PRIX_BREAKS[i].toLocaleString("fr-FR")}`,
+}));
+
 const ZONE_SOURCE = "zone";
 const ZONE_LAYERS = [
   "zone-contexte-line", "zone-etude-fill", "zone-etude-line", "zone-draft-line",
@@ -54,11 +68,36 @@ export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapCl
       style: BASE_STYLE,
       center: [2.5, 46.6],
       zoom: 5.5,
+      // Position dans l'URL (#zoom/lat/lon) : permet de partager une vue et de
+      // revenir au même endroit après rechargement.
+      hash: true,
       attributionControl: { compact: true },
     });
     map.addControl(new maplibregl.NavigationControl(), "top-right");
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }));
     map.on("click", (e) => clickRef.current(e.lngLat.lng, e.lngLat.lat));
+    // Infobulle des prix : le prix médian au m² de la maille survolée (couche marquée
+    // rendu prix_m2 via ses métadonnées, quel que soit son id de catalogue).
+    const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, maxWidth: "280px" });
+    map.on("mousemove", (e) => {
+      const ids = map
+        .getStyle()
+        .layers.filter((ly) => (ly.metadata as { rendu?: string } | undefined)?.rendu === "prix_m2")
+        .map((ly) => ly.id);
+      const f = ids.length ? map.queryRenderedFeatures(e.point, { layers: ids })[0] : undefined;
+      if (!f) {
+        popup.remove();
+        return;
+      }
+      const p = f.properties as { prix_m2: number; nb_ventes: number; libelle?: string; code: string };
+      popup
+        .setLngLat(e.lngLat)
+        .setText(
+          `${Number(p.prix_m2).toLocaleString("fr-FR")} €/m² médian — ` +
+            `${p.nb_ventes} vente${Number(p.nb_ventes) > 1 ? "s" : ""} (${p.libelle ?? p.code})`,
+        )
+        .addTo(map);
+    });
     map.on("load", () => {
       map.addSource(ZONE_SOURCE, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       map.addLayer({
@@ -121,7 +160,28 @@ export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapCl
     if (flyTo && mapRef.current) mapRef.current.flyTo({ center: flyTo, zoom: 15 });
   }, [flyTo]);
 
-  return <div id="map" />;
+  // Légende de la carte des prix, affichée dès que la couche choroplèthe est active.
+  const prixActif = !!catalog?.layers.some((l) => l.rendu === "prix_m2" && activeLayerIds.has(l.id));
+  return (
+    <>
+      <div id="map" />
+      {prixActif && (
+        <div className="prix-legende">
+          <div className="prix-legende-titre">Prix médian — ventes DVF (€/m²)</div>
+          {PRIX_CLASSES.map((c) => (
+            <div key={c.couleur} className="prix-legende-ligne">
+              <span className="prix-legende-carre" style={{ background: c.couleur }} />
+              {c.libelle}
+            </div>
+          ))}
+          <div className="prix-legende-note">
+            Maille selon le zoom : département → commune → section cadastrale → parcelle.
+            Aucune couleur = aucune vente connue.
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
 
 function syncOverlays(map: maplibregl.Map, catalog: Catalog | null, active: Set<string>) {
@@ -144,9 +204,23 @@ function syncOverlays(map: maplibregl.Map, catalog: Catalog | null, active: Set<
           type: "raster",
           tiles: [l.type === "wms" ? wmsTileUrl(l) : l.url],
           tileSize: 256,
+          // Certains WMS (EAIP) ne servent qu'une fenêtre d'échelles : en la déclarant,
+          // MapLibre ré-agrandit la tuile la plus proche au lieu d'afficher du vide.
+          ...(l.zoom_natif_min != null ? { minzoom: l.zoom_natif_min } : {}),
+          ...(l.zoom_natif_max != null ? { maxzoom: l.zoom_natif_max } : {}),
           attribution: l.attribution ?? "",
         });
-        map.addLayer({ id: layerId, type: "raster", source: sourceId, paint: { "raster-opacity": 0.75 } });
+        map.addLayer({
+          id: layerId,
+          type: "raster",
+          source: sourceId,
+          paint: {
+            "raster-opacity": l.opacite ?? 0.75,
+            // Renforcement des aplats trop pâles (EAIP est servi en bleu quasi blanc) :
+            // on assombrit le point blanc et on remonte la saturation.
+            ...(l.renforcement ? { "raster-brightness-max": 0.6, "raster-saturation": 0.7 } : {}),
+          },
+        });
       } else {
         // Tuiles vectorielles : servies par l'API depuis PostGIS (vector), ou fichier
         // PMTiles produit par le pipeline (pmtiles).
@@ -166,14 +240,35 @@ function syncOverlays(map: maplibregl.Map, catalog: Catalog | null, active: Set<
           map.addSource(sourceId, { type: "vector", url: `pmtiles://${l.url}`, attribution: l.attribution ?? "" });
         }
         const sourceLayer = l.source_layer ?? l.id;
-        map.addLayer({
-          id: layerId, type: "fill", source: sourceId, "source-layer": sourceLayer,
-          paint: { "fill-color": themeColor(catalog, l.theme), "fill-opacity": 0.25 },
-        });
-        map.addLayer({
-          id: `${layerId}-line`, type: "line", source: sourceId, "source-layer": sourceLayer,
-          paint: { "line-color": themeColor(catalog, l.theme), "line-width": 1 },
-        });
+        if (l.rendu === "prix_m2") {
+          // Choroplèthe : couleur par classe de prix. Les mailles sans vente ne sont
+          // simplement pas dans les tuiles — rien n'est dessiné là où on ne sait rien.
+          const stepExpr = [
+            "step", ["get", "prix_m2"], PRIX_COLORS[0],
+            PRIX_BREAKS[0], PRIX_COLORS[1],
+            PRIX_BREAKS[1], PRIX_COLORS[2],
+            PRIX_BREAKS[2], PRIX_COLORS[3],
+            PRIX_BREAKS[3], PRIX_COLORS[4],
+          ] as unknown as maplibregl.ExpressionSpecification;
+          map.addLayer({
+            id: layerId, type: "fill", source: sourceId, "source-layer": sourceLayer,
+            metadata: { rendu: "prix_m2" },
+            paint: { "fill-color": stepExpr, "fill-opacity": 0.65 },
+          });
+          map.addLayer({
+            id: `${layerId}-line`, type: "line", source: sourceId, "source-layer": sourceLayer,
+            paint: { "line-color": "#581D74", "line-width": 0.5, "line-opacity": 0.5 },
+          });
+        } else {
+          map.addLayer({
+            id: layerId, type: "fill", source: sourceId, "source-layer": sourceLayer,
+            paint: { "fill-color": themeColor(catalog, l.theme), "fill-opacity": 0.25 },
+          });
+          map.addLayer({
+            id: `${layerId}-line`, type: "line", source: sourceId, "source-layer": sourceLayer,
+            paint: { "line-color": themeColor(catalog, l.theme), "line-width": 1 },
+          });
+        }
       }
     } catch (e) {
       console.warn(`Couche ${l.id} non chargée :`, e);

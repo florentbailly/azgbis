@@ -63,8 +63,8 @@ Ces couleurs sont déclarées comme design tokens CSS (`--color-theme-risques-na
 Colonne « Mode » : **live** = appelé à la volée (affichage WMS + interrogation API pour le rapport) ; **batch** = intégré en PostGIS par le pipeline (§9), puis affiché en tuiles vectorielles.
 
 Deux voies de tuilage pour les couches batch, selon le volume :
-- **MVT servies depuis PostGIS** (`GET /api/tiles/env/{familles}/{z}/{x}/{y}.pbf`, `ST_AsMVT`) pour les zonages INPN (~21 000 polygones) : mêmes données que l'analyse, donc aucun décalage possible entre la carte et les conclusions du rapport, et aucune étape de régénération après import. Généralisation d'affichage : géométrie précalculée à 50 m sous z10 et masquage des zonages de moins de 2×2 pixels (le rapport, lui, lit toujours `geom` en pleine résolution).
-- **PMTiles statiques** (tippecanoe, servies par Caddy) réservées aux gros volumes figés : cadastre, points DVF.
+- **MVT servies depuis PostGIS** (`ST_AsMVT`) : zonages INPN (`GET /api/tiles/env/…`, ~21 000 polygones) et carte des prix DVF (`GET /api/tiles/dvf/…`, agrégats précalculés). Mêmes données que l'analyse, donc aucun décalage possible entre la carte et les conclusions du rapport, et aucune étape de régénération après import. Généralisation d'affichage côté INPN : géométrie précalculée à 50 m sous z10 et masquage des zonages de moins de 2×2 pixels (le rapport, lui, lit toujours `geom` en pleine résolution).
+- **PMTiles statiques** (tippecanoe, servies par Caddy) réservées à d'éventuels gros volumes figés (fond cadastral complet) — aucune en service à ce stade.
 
 ### 3.1 Risques naturels — `#DB4B4B`
 
@@ -128,7 +128,7 @@ Communes au RNU ou non versées au GPU : l'outil l'affiche explicitement (« doc
 | BDNB (Base de données nationale des bâtiments, CSTB) — sous-ensemble : identifiants bâtiment/parcelle, usage principal, année de construction, surfaces | data.gouv.fr, jeu « Base de données nationale des bâtiments » | batch semestriel |
 | SIRENE géolocalisé (établissements actifs, code NAF) | `https://files.data.gouv.fr/geo-sirene/` (dernier millésime) | batch mensuel |
 
-Affichage carte : points de transaction (cercles proportionnels au prix/m², couleur par typologie), agrégats commune/section au dézoom (PMTiles précalculées). Filtres : période, typologie (§5), surface, prix/m², année de construction, DPE, nature de mutation (vente, VEFA…).
+Affichage carte : **choroplèthe du prix médian au m²** (rampe séquentielle violette, 5 classes), maille adaptée au zoom — département (≤ z8), commune/arrondissement (z9-11), section cadastrale (z12-13), parcelle (≥ z14) — avec infobulle (prix médian, nb de ventes) et légende ; rien n'est dessiné là où aucune vente avec prix n'est connue. Contours : cadastre Etalab (`ingest contours`), seules les parcelles vendues sont conservées. Évolution possible : points de transaction individuels filtrables (période, typologie §5, surface, DPE, nature de mutation) une fois `GET /dvf/transactions` livré.
 
 ### 3.6 Bâti & occupants — `#8A5599` (partiel en lot 1)
 
@@ -221,8 +221,11 @@ env_zonages(id PK, famille /* natura2000|znieff1|znieff2|espace_protege|patrimoi
             geom_gen MultiPolygon /* généralisée ~50 m, affichage carte only */,
             surface_m2 /* précalculée : filtre de lisibilité des tuiles */)
 
--- Cadastre (affichage batch ; la fiche parcelle passe par l'API Carto en live)
-parcelles(id_parcelle PK, code_commune, section, numero, contenance, geom MultiPolygon)
+-- Carte des prix (affichage uniquement ; l'analyse recalcule toujours sur dvf_locaux)
+contours(id PK, niveau /* parcelle|section|commune|departement */, code, libelle,
+         geom MultiPolygon /* cadastre Etalab ; parcelles limitées à celles vendues */)
+dvf_prix(id PK, niveau, code, libelle, nb_ventes,
+         prix_m2_median /* même définition que le thème Marché */, geom MultiPolygon)
 ```
 
 Index : GIST sur toutes les `geom` ; B-tree sur `code_commune`, `date_mutation`, `typologie`. Chaque table batch référence `sources.id` du millésime courant ; les imports sont **remplaçants** (nouvelle table, bascule par renommage) pour ne jamais servir un état partiel.
@@ -238,6 +241,9 @@ Catalogue des couches : id, thème, libellé, mode (live/batch), style, millési
 
 ### `GET /tiles/env/{familles}/{z}/{x}/{y}.pbf`
 Tuiles vectorielles (MVT) des zonages INPN, servies depuis PostGIS (§3). `familles` = liste séparée par des virgules (ex. `znieff1,znieff2`) ; couche MVT `zonages`, attributs `famille`, `code_national`, `libelle`, `url_fiche_inpn`. Tuile sans zonage → `204` (et non `404` : l'absence de donnée est un résultat normal). Famille inconnue → `404`.
+
+### `GET /tiles/dvf/{z}/{x}/{y}.pbf`
+Tuiles vectorielles de la carte des prix : couche MVT `prix`, attributs `niveau`, `code`, `libelle`, `nb_ventes`, `prix_m2` (médiane, même définition que le thème Marché). Le niveau d'agrégation dépend du zoom demandé : `departement` (z ≤ 8), `commune` (9-11), `section` (12-13), `parcelle` (≥ 14). Les mailles sont précalculées dans `dvf_prix` par `ingest contours` et rafraîchies par chaque `ingest dvf`. Tuile sans vente → `204`.
 
 ### `POST /zones/analyze`
 ```json
@@ -294,7 +300,7 @@ Chemin type : téléchargement (stockage brut daté sur disque) → contrôles (
 | BDNB | semestrielle | suivi manuel des releases CSTB |
 | SIRENE géolocalisé | mensuelle | cron |
 | INPN (5 familles) | semestrielle | cron (`ingest inpn --famille …`, WFS PatriNat) |
-| Cadastre Etalab (PMTiles) | trimestrielle | cron |
+| Contours cadastre Etalab (carte des prix) | trimestrielle | cron (`ingest contours --dept …`) |
 
 L'enrichissement typologique (§5) est un job dépendant, relancé après tout import DVF, BDNB ou SIRENE.
 

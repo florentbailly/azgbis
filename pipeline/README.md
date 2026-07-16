@@ -35,8 +35,16 @@ $env:DATABASE_URL = "postgresql://azgbis:azgbis@localhost:5433/azgbis"
 
 .\.venv\Scripts\python -m ingest schema                          # 1. tables
 .\.venv\Scripts\python -m ingest dvf --dept 69 --years 2021-2025 # 2. DVF (auto-téléchargé ; « latest » = 5 dernières années)
+.\.venv\Scripts\python -m ingest contours --dept 69              # 3. carte des prix (cadastre Etalab)
 .\.venv\Scripts\python -m ingest status                          # vérifier
 ```
+
+`ingest contours` alimente la couche carte « Prix au m² (ventes DVF) » : il télécharge
+les contours cadastraux Etalab du département (communes, sections, et uniquement les
+parcelles portant une vente), puis calcule dans `dvf_prix` le prix médian au m² par
+maille — département, commune, section, parcelle — avec la même définition de médiane
+que le thème Marché de l'analyse. À lancer **après** `ingest dvf` du département ;
+les imports DVF suivants recalculent `dvf_prix` automatiquement.
 
 INPN (auto-téléchargé depuis le WFS PatriNat de la Géoplateforme) :
 ```powershell
@@ -70,8 +78,8 @@ Les thèmes Environnement et Marché de « Analyser la zone » utilisent alors l
 - `ingest enrich` : POC T-02 — appariement BDNB + SIRENE pour la typologie tertiaire
   (l'import DVF pose déjà les colonnes typologie/source/confiance ; niveau « dvf » seul).
 - `ingest dpe`, `ingest bdnb`, `ingest sirene`.
-- `ingest tiles` : génération PMTiles (tippecanoe) pour les **gros volumes figés** — points DVF
-  et cadastre. Les zonages INPN, eux, sont servis en tuiles vectorielles directement depuis
-  PostGIS (`GET /api/tiles/env/...`) : rien à générer, et la carte ne peut pas diverger de
-  l'analyse. Tant que ces PMTiles n'existent pas, la couche « Transactions DVF » de la carte
-  reste marquée « flux à confirmer » et n'affiche rien (l'analyse DVF, elle, fonctionne).
+- `ingest tiles` : génération PMTiles (tippecanoe), désormais réservée à d'éventuels
+  **gros volumes figés** (fond cadastral complet, par exemple). Les zonages INPN
+  (`/api/tiles/env/...`) comme la carte des prix DVF (`/api/tiles/dvf/...`) sont servis
+  en tuiles vectorielles directement depuis PostGIS : rien à générer, et la carte ne
+  peut pas diverger de l'analyse.

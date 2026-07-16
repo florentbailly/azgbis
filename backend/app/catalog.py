@@ -20,7 +20,7 @@ THEME_COLORS = {
 GEORISQUES_WMS = "https://www.georisques.gouv.fr/services"
 
 
-def _wms(id: str, theme: str, libelle: str, wms_layer: str, attribution: str = "Géorisques") -> dict:
+def _wms(id: str, theme: str, libelle: str, wms_layer: str, attribution: str = "Géorisques", **extra) -> dict:
     return {
         "id": id,
         "theme": theme,
@@ -31,6 +31,7 @@ def _wms(id: str, theme: str, libelle: str, wms_layer: str, attribution: str = "
         "wms_layer": wms_layer,
         "attribution": attribution,
         "flux_confirme": True,
+        **extra,
     }
 
 
@@ -68,7 +69,12 @@ LAYERS: list[dict] = [
     # --- Risques naturels (WMS Géorisques, noms vérifiés T-01) -----------------
     _wms("rga", "risques_naturels", "Retrait-gonflement des argiles", "ALEARG", "Géorisques / BRGM"),
     _wms("remontee_nappes", "risques_naturels", "Inondations — remontée de nappes", "REMNAPPE_FR", "Géorisques / BRGM"),
-    _wms("eaip", "risques_naturels", "Inondations potentielles (EAIP)", "MASQ_EAIP"),
+    # EAIP : le WMS ne sert cette couche qu'entre 1:500 000 et 1:90 000 (zooms tuile
+    # 11-12, vérifié au GetCapabilities le 16/07/2026) et dans un bleu très pâle.
+    # `zoom_natif_*` borne les requêtes sur la fenêtre servie (MapLibre ré-agrandit
+    # au-delà) et `renforcement` assombrit/sature le rendu, sinon invisible sur OSM.
+    _wms("eaip", "risques_naturels", "Inondations potentielles (EAIP)", "MASQ_EAIP",
+         zoom_natif_min=11, zoom_natif_max=12, renforcement=True, opacite=0.9),
     _wms("ppri_zonage", "risques_naturels", "Zonage réglementaire PPR Inondation", "PPRN_ZONE_INOND"),
     _wms("mvt", "risques_naturels", "Mouvements de terrain", "MVT_LOCALISE", "Géorisques / BRGM"),
     _wms("cavites", "risques_naturels", "Cavités souterraines", "CAVITE_LOCALISEE", "Géorisques / BRGM"),
@@ -113,14 +119,17 @@ LAYERS: list[dict] = [
     {
         "id": "dvf",
         "theme": "marche_ventes",
-        "libelle": "Transactions DVF (typologie enrichie)",
+        "libelle": "Prix au m² (ventes DVF)",
         "mode": "batch",
-        "type": "pmtiles",
-        "url": "/tiles/dvf.pmtiles",
-        "attribution": "DGFiP / Etalab — enrichi BDNB, SIRENE",
-        # PMTiles non encore générées (`ingest tiles` reste à écrire) : la couche ne peut
-        # rien afficher tant que le fichier n'existe pas, le badge le signale à l'expert.
-        "flux_confirme": False,
+        "type": "vector",
+        "url": "/api/tiles/dvf/{z}/{x}/{y}.pbf",
+        "source_layer": "prix",
+        # Le front rend cette couche en choroplèthe : prix médian au m² par maille,
+        # du département (petits zooms) à la parcelle (grands zooms). Rien n'est
+        # dessiné là où aucune vente avec prix n'est connue.
+        "rendu": "prix_m2",
+        "attribution": "DVF (DGFiP / Etalab) — contours cadastre Etalab",
+        "flux_confirme": True,
     },
 ]
 

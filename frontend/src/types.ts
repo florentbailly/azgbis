@@ -15,6 +15,16 @@ export interface LayerDef {
   wms_layer?: string;
   /** Couche à lire dans les tuiles vectorielles (types vector et pmtiles). */
   source_layer?: string;
+  /** Rendu spécial : "prix_m2" = choroplèthe du prix médian au m² (couche DVF). */
+  rendu?: "prix_m2";
+  /** Opacité du raster (défaut 0.75). */
+  opacite?: number;
+  /** Accentue un WMS servi trop pâle (assombrit + sature, ex. EAIP). */
+  renforcement?: boolean;
+  /** Fenêtre de zooms réellement servie par le WMS : en dehors, MapLibre
+   *  ré-agrandit la tuile la plus proche au lieu de recevoir du vide. */
+  zoom_natif_min?: number;
+  zoom_natif_max?: number;
   attribution?: string;
   flux_confirme: boolean;
 }

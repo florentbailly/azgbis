@@ -2,6 +2,7 @@
 
   python -m ingest schema                                 # crée les tables PostGIS
   python -m ingest dvf --dept 69 --years 2020-2024        # DVF géolocalisé d'un département
+  python -m ingest contours --dept 69                     # contours cadastraux + carte des prix
   python -m ingest inpn --famille natura2000              # zonages INPN (WFS PatriNat)
   python -m ingest status                                 # millésimes chargés
 """
@@ -19,6 +20,10 @@ def main() -> None:
     p_dvf = sub.add_parser("dvf")
     p_dvf.add_argument("--dept", required=True, help="code département, ex. 69 ou 2A")
     p_dvf.add_argument("--years", default="2021-2025", help="ex. 2021-2025 ou 2024 (le « latest » geo-dvf ne garde que 5 ans)")
+
+    p_ctr = sub.add_parser("contours")
+    p_ctr.add_argument("--dept", required=True,
+                       help="département dont importer les contours cadastraux (après `ingest dvf`)")
 
     p_inpn = sub.add_parser("inpn")
     p_inpn.add_argument("--famille", required=True, help="znieff1 | znieff2 | natura2000 | espace_protege | patrimoine_geol")
@@ -54,6 +59,11 @@ def main() -> None:
         else:
             years = [int(args.years)]
         dvf.run(args.dept, years)
+
+    elif args.cmd == "contours":
+        from . import contours
+
+        contours.run(args.dept)
 
     elif args.cmd == "inpn":
         from . import inpn

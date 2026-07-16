@@ -46,6 +46,35 @@ CREATE INDEX IF NOT EXISTS dvf_locaux_mutation_idx ON dvf_locaux (id_mutation);
 CREATE INDEX IF NOT EXISTS dvf_locaux_typologie_idx ON dvf_locaux (typologie);
 CREATE INDEX IF NOT EXISTS dvf_locaux_parcelle_idx ON dvf_locaux (id_parcelle);
 
+-- Contours cadastraux et administratifs (etalab-cadastre), support de la carte des
+-- prix : parcelles (seulement celles ayant une vente), sections, communes, département.
+CREATE TABLE IF NOT EXISTS contours (
+    id          bigserial PRIMARY KEY,
+    niveau      text NOT NULL, -- parcelle | section | commune | departement
+    code        text NOT NULL, -- id cadastral (14 c. parcelle, 10 c. section) ou code INSEE
+    libelle     text,
+    source_id   int REFERENCES sources(id),
+    geom        geometry(MultiPolygon, 2154),
+    UNIQUE (niveau, code)
+);
+CREATE INDEX IF NOT EXISTS contours_geom_idx ON contours USING gist (geom);
+
+-- Prix médian au m² par maille, précalculé par `ingest contours` (et rafraîchi par
+-- `ingest dvf`) : sert uniquement aux tuiles carte /api/tiles/dvf. L'analyse et le
+-- rapport recalculent toujours leurs médianes sur dvf_locaux, jamais sur cette table.
+CREATE TABLE IF NOT EXISTS dvf_prix (
+    id              bigserial PRIMARY KEY,
+    niveau          text NOT NULL,
+    code            text NOT NULL,
+    libelle         text,
+    nb_ventes       int NOT NULL,
+    prix_m2_median  double precision,
+    geom            geometry(MultiPolygon, 2154),
+    UNIQUE (niveau, code)
+);
+CREATE INDEX IF NOT EXISTS dvf_prix_geom_idx ON dvf_prix USING gist (geom);
+CREATE INDEX IF NOT EXISTS dvf_prix_niveau_idx ON dvf_prix (niveau);
+
 CREATE TABLE IF NOT EXISTS env_zonages (
     id              bigserial PRIMARY KEY,
     famille         text NOT NULL, -- natura2000 | znieff1 | znieff2 | espace_protege | patrimoine_geol

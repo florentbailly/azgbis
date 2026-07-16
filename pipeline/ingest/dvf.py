@@ -82,4 +82,9 @@ def run(dept: str, years: list[int]) -> None:
         conn.commit()
         print(f"  {year}/{dept} : {len(mutations)} mutations, {len(rows)} locaux importés "
               f"({datetime.datetime.now():%H:%M:%S})")
+    # Les médianes de la carte des prix dépendent des ventes : recalcul systématique
+    # (sans effet tant que `ingest contours` n'a pas été lancé).
+    from . import contours
+
+    contours.refresh(conn)
     conn.close()

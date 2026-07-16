@@ -73,6 +73,7 @@ git clone <repo> && cd azgbis
 podman compose up -d --build                              # postgis + api + web (port 80)
 podman compose --profile tools run --rm ingest schema     # créer les tables
 podman compose --profile tools run --rm ingest dvf --dept 69 --years 2021-2025
+podman compose --profile tools run --rm ingest contours --dept 69            # carte des prix au m²
 podman compose --profile tools run --rm ingest inpn --famille znieff1        # ~17 000 zonages
 podman compose --profile tools run --rm ingest inpn --famille znieff2
 podman compose --profile tools run --rm ingest inpn --famille natura2000     # SIC + ZPS

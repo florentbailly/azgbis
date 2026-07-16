@@ -64,14 +64,66 @@ async def env_tile(familles: str, z: int, x: int, y: int) -> Response:
     inconnues = set(demandees) - set(FAMILLES)
     if inconnues:
         raise HTTPException(404, f"Famille(s) inconnue(s) : {', '.join(sorted(inconnues))}")
-    if not 0 <= z <= 22 or not 0 <= x < 2**z or not 0 <= y < 2**z:
-        raise HTTPException(400, "Coordonnées de tuile hors limites.")
-
+    _check_zxy(z, x, y)
     p = await db.pool()
     if p is None:
         raise HTTPException(503, db.NO_DB_WARNING)
-    mvt = await p.fetchval(SQL, z, x, y, demandees)
-    # Une tuile vide est un résultat normal (pas de zonage ici) : 204 plutôt que 404,
+    return _mvt_response(await p.fetchval(SQL, z, x, y, demandees))
+
+
+# --- Carte des prix DVF -------------------------------------------------------------
+# Une maille par niveau de zoom : le prix médian au m² est précalculé dans dvf_prix
+# par `ingest contours` (mêmes médianes que le thème Marché de l'analyse).
+MVT_PRIX_LAYER = "prix"
+
+
+def _niveau(z: int) -> str:
+    if z <= 8:
+        return "departement"
+    if z <= 11:
+        return "commune"
+    if z <= 13:
+        return "section"
+    return "parcelle"  # au-delà de z14, MapLibre ré-agrandit les tuiles z14
+
+
+SQL_PRIX = f"""
+WITH b AS (
+    SELECT ST_TileEnvelope($1, $2, $3) AS g3857,
+           ST_Transform(ST_TileEnvelope($1, $2, $3), 2154) AS g2154
+),
+p AS (
+    SELECT (ST_XMax(b.g2154) - ST_XMin(b.g2154)) / 4096 AS tol FROM b
+)
+SELECT ST_AsMVT(q, '{MVT_PRIX_LAYER}', 4096, 'geom') FROM (
+    SELECT d.niveau, d.code, d.libelle, d.nb_ventes,
+           round(d.prix_m2_median)::int AS prix_m2,
+           ST_AsMVTGeom(
+               ST_Transform(ST_SimplifyPreserveTopology(d.geom, p.tol), 3857),
+               b.g3857, 4096, 64, true) AS geom
+    FROM dvf_prix d, b, p
+    WHERE d.niveau = $4 AND d.geom && b.g2154
+) q
+WHERE q.geom IS NOT NULL
+"""
+
+
+@router.get("/api/tiles/dvf/{z}/{x}/{y}.pbf")
+async def dvf_tile(z: int, x: int, y: int) -> Response:
+    _check_zxy(z, x, y)
+    p = await db.pool()
+    if p is None:
+        raise HTTPException(503, db.NO_DB_WARNING)
+    return _mvt_response(await p.fetchval(SQL_PRIX, z, x, y, _niveau(z)))
+
+
+def _check_zxy(z: int, x: int, y: int) -> None:
+    if not 0 <= z <= 22 or not 0 <= x < 2**z or not 0 <= y < 2**z:
+        raise HTTPException(400, "Coordonnées de tuile hors limites.")
+
+
+def _mvt_response(mvt) -> Response:
+    # Une tuile vide est un résultat normal (pas de donnée ici) : 204 plutôt que 404,
     # sinon MapLibre journalise une erreur sur chaque tuile sans donnée.
     if not mvt:
         return Response(status_code=204)

@@ -1,0 +1,133 @@
+import { useEffect, useMemo, useState } from "react";
+import { analyzeZone, fetchCatalog } from "./api";
+import AnalysisPanel, { type ParcelInfo } from "./components/AnalysisPanel";
+import LayerPanel from "./components/LayerPanel";
+import MapView from "./components/MapView";
+import ZoneToolbar from "./components/ZoneToolbar";
+import type { AnalyzeResponse, Catalog } from "./types";
+import { initialDraft, loadDraft, saveDraft, toFeatures, toZoneInput, type ZoneDraft } from "./zone";
+
+const DEFAULT_THEMES = ["risques_naturels", "risques_technologiques", "environnement", "urbanisme", "marche_ventes"];
+
+export default function App() {
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [activeLayerIds, setActiveLayerIds] = useState<Set<string>>(new Set());
+  const [draft, setDraft] = useState<ZoneDraft>(() => loadDraft() ?? initialDraft);
+  const [selectedThemes, setSelectedThemes] = useState<Set<string>>(new Set(DEFAULT_THEMES));
+  const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [parcel, setParcel] = useState<ParcelInfo | null>(null);
+  const [flyTo, setFlyTo] = useState<[number, number] | null>(null);
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(true);
+
+  useEffect(() => {
+    fetchCatalog().then(setCatalog).catch((e) => setError(`Catalogue de couches inaccessible : ${e}`));
+  }, []);
+
+  useEffect(() => saveDraft(draft), [draft]);
+
+  const zoneFeatures = useMemo(() => {
+    const fc = toFeatures(draft);
+    // Surlignage de la parcelle sélectionnée sur la carte (retour utilisateur 16/07/2026).
+    if (parcel?.parcelle?.geometry) {
+      fc.features.push({
+        type: "Feature",
+        geometry: parcel.parcelle.geometry,
+        properties: { role: "parcelle" },
+      });
+    }
+    return fc;
+  }, [draft, parcel]);
+  const zoneInput = useMemo(() => toZoneInput(draft), [draft]);
+
+  function updateDraft(d: ZoneDraft) {
+    setDraft(d);
+  }
+
+  async function onMapClick(lon: number, lat: number) {
+    if (draft.mode === "point") {
+      setDraft({ ...draft, center: [lon, lat] });
+    } else if (draft.mode === "polygon" && !draft.polygonClosed) {
+      setDraft({ ...draft, polygonPoints: [...draft.polygonPoints, [lon, lat]] });
+    } else if (draft.mode === "select") {
+      try {
+        const r = await fetch(`/api/parcelles/lookup?lon=${lon}&lat=${lat}`);
+        setParcel(await r.json());
+      } catch (e) {
+        setParcel({ parcelle: null, zones_plu: [], commune: null, avertissements: [String(e)] });
+      }
+    }
+  }
+
+  async function onAnalyze() {
+    if (!zoneInput || selectedThemes.size === 0) return;
+    setAnalyzing(true);
+    setError(null);
+    try {
+      setAnalysis(await analyzeZone(zoneInput, [...selectedThemes]));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  return (
+    <div className="app">
+      {leftOpen && (
+        <LayerPanel
+          catalog={catalog}
+          activeLayerIds={activeLayerIds}
+          onToggle={(id) =>
+            setActiveLayerIds((prev) => {
+              const next = new Set(prev);
+              next.has(id) ? next.delete(id) : next.add(id);
+              return next;
+            })
+          }
+        />
+      )}
+      <div className="map-container">
+        <button className="panel-toggle left" onClick={() => setLeftOpen((v) => !v)}>
+          {leftOpen ? "◀ masquer" : "Couches ▶"}
+        </button>
+        <button className="panel-toggle right" onClick={() => setRightOpen((v) => !v)}>
+          {rightOpen ? "masquer ▶" : "◀ Analyse"}
+        </button>
+        <ZoneToolbar
+          draft={draft}
+          onDraftChange={updateDraft}
+          onAnalyze={onAnalyze}
+          analyzing={analyzing}
+          canAnalyze={zoneInput !== null && selectedThemes.size > 0}
+          onFlyTo={setFlyTo}
+        />
+        <MapView
+          catalog={catalog}
+          activeLayerIds={activeLayerIds}
+          zoneFeatures={zoneFeatures}
+          onMapClick={onMapClick}
+          flyTo={flyTo}
+        />
+      </div>
+      {rightOpen && (
+        <AnalysisPanel
+          catalog={catalog}
+          analysis={analysis}
+          error={error}
+          parcel={parcel}
+          selectedThemes={selectedThemes}
+          onToggleTheme={(id) =>
+            setSelectedThemes((prev) => {
+              const next = new Set(prev);
+              next.has(id) ? next.delete(id) : next.add(id);
+              return next;
+            })
+          }
+        />
+      )}
+    </div>
+  );
+}

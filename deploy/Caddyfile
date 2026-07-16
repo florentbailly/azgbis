@@ -1,0 +1,24 @@
+# Reverse proxy + fichiers statiques (spec §10).
+# Sur la VM : remplacer :80 par le nom de domaine pour obtenir le HTTPS automatique
+# (ex. "carto.exemple.fr {") — Caddy gère alors les certificats Let's Encrypt seul.
+:80 {
+	encode gzip
+
+	# API backend
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Tuiles PMTiles produites par le pipeline (les requêtes Range sont gérées nativement)
+	handle_path /tiles/* {
+		root * /srv/tiles
+		file_server
+	}
+
+	# Front (SPA) : tout chemin inconnu retombe sur index.html
+	handle {
+		root * /srv/www
+		try_files {path} /index.html
+		file_server
+	}
+}

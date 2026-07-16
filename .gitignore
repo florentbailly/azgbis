@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Node / front
+node_modules/
+frontend/dist/
+
+# Données locales du pipeline (brut téléchargé, tuiles générées)
+pipeline/raw/
+tiles/
+
+# Environnement & secrets
+.env
+*.local
+
+# Divers
+*.log
+.DS_Store
+Thumbs.db

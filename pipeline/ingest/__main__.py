@@ -1,0 +1,63 @@
+"""CLI du pipeline batch (spec §9).
+
+  python -m ingest schema                                 # crée les tables PostGIS
+  python -m ingest dvf --dept 69 --years 2020-2024        # DVF géolocalisé d'un département
+  python -m ingest inpn --famille natura2000 --file X.zip # zonages INPN (fichier local)
+  python -m ingest status                                 # millésimes chargés
+"""
+import argparse
+from pathlib import Path
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(prog="ingest")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("schema")
+    sub.add_parser("status")
+
+    p_dvf = sub.add_parser("dvf")
+    p_dvf.add_argument("--dept", required=True, help="code département, ex. 69 ou 2A")
+    p_dvf.add_argument("--years", default="2021-2025", help="ex. 2021-2025 ou 2024 (le « latest » geo-dvf ne garde que 5 ans)")
+
+    p_inpn = sub.add_parser("inpn")
+    p_inpn.add_argument("--famille", required=True)
+    p_inpn.add_argument("--file", required=True, help="archive shapefile/GPKG téléchargée depuis inpn.mnhn.fr")
+
+    args = p.parse_args()
+
+    if args.cmd == "schema":
+        from .common import db
+
+        sql = (Path(__file__).parents[1] / "schema.sql").read_text(encoding="utf-8")
+        with db() as conn:
+            conn.execute(sql)
+            conn.commit()
+        print("Schéma créé/à jour.")
+
+    elif args.cmd == "status":
+        from .common import db
+
+        with db() as conn, conn.cursor() as cur:
+            cur.execute("SELECT code, millesime, date_import FROM sources ORDER BY date_import DESC LIMIT 30")
+            for code, mil, dt in cur.fetchall():
+                print(f"  {code:<24} {mil:<12} {dt:%Y-%m-%d %H:%M}")
+
+    elif args.cmd == "dvf":
+        from . import dvf
+
+        if "-" in args.years:
+            a, b = args.years.split("-")
+            years = list(range(int(a), int(b) + 1))
+        else:
+            years = [int(args.years)]
+        dvf.run(args.dept, years)
+
+    elif args.cmd == "inpn":
+        from . import inpn
+
+        inpn.run(args.famille, args.file)
+
+
+if __name__ == "__main__":
+    main()

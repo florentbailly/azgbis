@@ -1,0 +1,62 @@
+# Déploiement sur VM Linux avec Podman (spec §10).
+#   podman compose up -d --build          # postgis + api + web
+#   podman compose run --rm ingest schema # puis les imports (voir pipeline/README.md)
+# Compatible docker compose. Sous Podman, installer le paquet `podman-compose`
+# ou le plugin docker-compose ; `podman compose` détecte l'un ou l'autre.
+services:
+  postgis:
+    image: docker.io/postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: azgbis
+      POSTGRES_PASSWORD: azgbis
+      POSTGRES_DB: azgbis
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U azgbis -d azgbis"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # Décommenter pour exécuter le pipeline depuis l'hôte plutôt qu'en conteneur :
+    # ports:
+    #   - "5432:5432"
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://azgbis:azgbis@postgis:5432/azgbis
+    depends_on:
+      postgis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    volumes:
+      - tiles:/srv/tiles:ro
+    restart: unless-stopped
+
+  # Pipeline batch : lancé à la demande, jamais en service permanent.
+  #   podman compose run --rm ingest dvf --dept 69 --years 2021-2025
+  ingest:
+    build: ./pipeline
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: postgresql://azgbis:azgbis@postgis:5432/azgbis
+    depends_on:
+      postgis:
+        condition: service_healthy
+    volumes:
+      - raw:/pipeline/raw
+      - tiles:/srv/tiles
+
+volumes:
+  pgdata:
+  raw:
+  tiles:

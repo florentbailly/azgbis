@@ -33,7 +33,7 @@ def register_source(conn: psycopg.Connection, code: str, libelle: str, url: str,
         return cur.fetchone()[0]
 
 
-def _ssl_context() -> ssl.SSLContext | bool:
+def ssl_context() -> ssl.SSLContext | bool:
     if os.environ.get("SSL_NO_VERIFY") == "1":
         return False
     try:
@@ -52,7 +52,7 @@ def download(url: str, dest_name: str) -> Path:
         print(f"  déjà présent : {dest}")
         return dest
     print(f"  téléchargement {url}")
-    with httpx.stream("GET", url, verify=_ssl_context(), timeout=600, follow_redirects=True) as r:
+    with httpx.stream("GET", url, verify=ssl_context(), timeout=600, follow_redirects=True) as r:
         r.raise_for_status()
         with open(dest, "wb") as f:
             for chunk in r.iter_bytes(1 << 20):

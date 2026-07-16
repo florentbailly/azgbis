@@ -34,6 +34,21 @@ def _wms(id: str, theme: str, libelle: str, wms_layer: str, attribution: str = "
     }
 
 
+def _env(id: str, libelle: str, familles: str) -> dict:
+    """Zonages INPN importés en base, servis en tuiles vectorielles par /api/tiles/env."""
+    return {
+        "id": id,
+        "theme": "environnement",
+        "libelle": libelle,
+        "mode": "batch",
+        "type": "vector",
+        "url": f"/api/tiles/env/{familles}/{{z}}/{{x}}/{{y}}.pbf",
+        "source_layer": "zonages",
+        "attribution": "INPN / MNHN — WFS PatriNat",
+        "flux_confirme": True,
+    }
+
+
 LAYERS: list[dict] = [
     # --- Fonds de carte -------------------------------------------------------
     {
@@ -89,37 +104,11 @@ LAYERS: list[dict] = [
         "attribution": "IGN — Parcellaire Express",
         "flux_confirme": True,
     },
-    # --- Environnement (batch : PMTiles produites par le pipeline) --------------
-    {
-        "id": "natura2000",
-        "theme": "environnement",
-        "libelle": "Natura 2000",
-        "mode": "batch",
-        "type": "pmtiles",
-        "url": "/tiles/env_natura2000.pmtiles",
-        "attribution": "INPN / MNHN",
-        "flux_confirme": True,
-    },
-    {
-        "id": "znieff",
-        "theme": "environnement",
-        "libelle": "ZNIEFF I & II",
-        "mode": "batch",
-        "type": "pmtiles",
-        "url": "/tiles/env_znieff.pmtiles",
-        "attribution": "INPN / MNHN",
-        "flux_confirme": True,
-    },
-    {
-        "id": "espaces_proteges",
-        "theme": "environnement",
-        "libelle": "Espaces protégés",
-        "mode": "batch",
-        "type": "pmtiles",
-        "url": "/tiles/env_espaces_proteges.pmtiles",
-        "attribution": "INPN / MNHN",
-        "flux_confirme": True,
-    },
+    # --- Environnement (batch : tuiles vectorielles servies depuis PostGIS) ------
+    _env("natura2000", "Natura 2000", "natura2000"),
+    _env("znieff", "ZNIEFF I & II", "znieff1,znieff2"),
+    _env("espaces_proteges", "Espaces protégés", "espace_protege"),
+    _env("patrimoine_geol", "Patrimoine géologique", "patrimoine_geol"),
     # --- Marché (batch) ----------------------------------------------------------
     {
         "id": "dvf",
@@ -129,7 +118,9 @@ LAYERS: list[dict] = [
         "type": "pmtiles",
         "url": "/tiles/dvf.pmtiles",
         "attribution": "DGFiP / Etalab — enrichi BDNB, SIRENE",
-        "flux_confirme": True,
+        # PMTiles non encore générées (`ingest tiles` reste à écrire) : la couche ne peut
+        # rien afficher tant que le fichier n'existe pas, le badge le signale à l'expert.
+        "flux_confirme": False,
     },
 ]
 

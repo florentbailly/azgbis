@@ -55,5 +55,13 @@ CREATE TABLE IF NOT EXISTS env_zonages (
     source_id       int REFERENCES sources(id),
     geom            geometry(MultiPolygon, 2154)
 );
+-- Géométrie généralisée (~50 m), calculée à l'import : sert uniquement à l'affichage
+-- carte aux petites échelles, où re-simplifier les grands contours ZNIEFF à chaque
+-- tuile coûte plusieurs secondes. L'analyse et le rapport n'utilisent que `geom`.
+ALTER TABLE env_zonages ADD COLUMN IF NOT EXISTS geom_gen geometry(MultiPolygon, 2154);
+-- Surface précalculée : permet d'écarter les zonages sub-pixel à l'affichage sans
+-- exécuter ST_Area sur toute la table à chaque tuile.
+ALTER TABLE env_zonages ADD COLUMN IF NOT EXISTS surface_m2 double precision;
 CREATE INDEX IF NOT EXISTS env_zonages_geom_idx ON env_zonages USING gist (geom);
 CREATE INDEX IF NOT EXISTS env_zonages_famille_idx ON env_zonages (famille);
+CREATE INDEX IF NOT EXISTS env_zonages_surface_idx ON env_zonages (surface_m2);

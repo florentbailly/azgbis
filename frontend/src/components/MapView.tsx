@@ -134,7 +134,7 @@ function syncOverlays(map: maplibregl.Map, catalog: Catalog | null, active: Set<
     if (wanted === present) continue;
     if (!wanted) {
       map.removeLayer(layerId);
-      if (l.type === "pmtiles" && map.getLayer(`${layerId}-line`)) map.removeLayer(`${layerId}-line`);
+      if (map.getLayer(`${layerId}-line`)) map.removeLayer(`${layerId}-line`);
       if (map.getSource(sourceId)) map.removeSource(sourceId);
       continue;
     }
@@ -148,14 +148,30 @@ function syncOverlays(map: maplibregl.Map, catalog: Catalog | null, active: Set<
         });
         map.addLayer({ id: layerId, type: "raster", source: sourceId, paint: { "raster-opacity": 0.75 } });
       } else {
-        // PMTiles produites par le pipeline batch ; source-layer = id de la couche par convention.
-        map.addSource(sourceId, { type: "vector", url: `pmtiles://${l.url}`, attribution: l.attribution ?? "" });
+        // Tuiles vectorielles : servies par l'API depuis PostGIS (vector), ou fichier
+        // PMTiles produit par le pipeline (pmtiles).
+        if (l.type === "vector") {
+          // Concaténation et non `new URL()`, qui percent-encoderait les {z}/{x}/{y}
+          // du gabarit et empêcherait MapLibre de les substituer.
+          // maxzoom : au-delà de 14 MapLibre ré-agrandit les tuiles de z14 au lieu
+          // d'en demander de nouvelles — inutile de solliciter la base à chaque zoom.
+          map.addSource(sourceId, {
+            type: "vector",
+            tiles: [`${window.location.origin}${l.url}`],
+            minzoom: 5,
+            maxzoom: 14,
+            attribution: l.attribution ?? "",
+          });
+        } else {
+          map.addSource(sourceId, { type: "vector", url: `pmtiles://${l.url}`, attribution: l.attribution ?? "" });
+        }
+        const sourceLayer = l.source_layer ?? l.id;
         map.addLayer({
-          id: layerId, type: "fill", source: sourceId, "source-layer": l.id,
+          id: layerId, type: "fill", source: sourceId, "source-layer": sourceLayer,
           paint: { "fill-color": themeColor(catalog, l.theme), "fill-opacity": 0.25 },
         });
         map.addLayer({
-          id: `${layerId}-line`, type: "line", source: sourceId, "source-layer": l.id,
+          id: `${layerId}-line`, type: "line", source: sourceId, "source-layer": sourceLayer,
           paint: { "line-color": themeColor(catalog, l.theme), "line-width": 1 },
         });
       }

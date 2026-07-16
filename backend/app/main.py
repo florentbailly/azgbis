@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import catalog, config, db
+from . import catalog, config, db, tiles
 from .analyze import environnement, marche_ventes, risques_naturels, risques_technologiques, urbanisme
 from .clients import apicarto, http
 from .clients.http import SourceError
@@ -32,6 +32,8 @@ app = FastAPI(title="Qualification de zone — lot 1", version=config.APP_VERSIO
 
 # Outil interne sans authentification (décision lot 1) : CORS ouvert pour le dev.
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+app.include_router(tiles.router)
 
 
 @app.get("/api/health")

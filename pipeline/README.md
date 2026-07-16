@@ -38,13 +38,24 @@ $env:DATABASE_URL = "postgresql://azgbis:azgbis@localhost:5433/azgbis"
 .\.venv\Scripts\python -m ingest status                          # vérifier
 ```
 
-INPN (téléchargement manuel — leurs URLs d'archives ne sont pas stables) :
-depuis https://inpn.mnhn.fr, « Téléchargement des données de référence », récupérer
-les couches métropole (shapefile ou GPKG) puis :
+INPN (auto-téléchargé depuis le WFS PatriNat de la Géoplateforme) :
 ```powershell
-.\.venv\Scripts\python -m ingest inpn --famille natura2000 --file raw\n2000.zip
-.\.venv\Scripts\python -m ingest inpn --famille znieff1 --file raw\znieff1.zip
+.\.venv\Scripts\python -m ingest inpn --famille natura2000      # SIC (Habitats) + ZPS (Oiseaux)
+.\.venv\Scripts\python -m ingest inpn --famille znieff1
+.\.venv\Scripts\python -m ingest inpn --famille znieff2
+.\.venv\Scripts\python -m ingest inpn --famille espace_protege  # parcs, réserves, APB, littoral…
+.\.venv\Scripts\python -m ingest inpn --famille patrimoine_geol
 ```
+Les cinq familles sont nationales : un import suffit pour tout le territoire. Chaque import
+calcule aussi les colonnes d'affichage `geom_gen` (contour généralisé à 50 m) et `surface_m2`,
+utilisées par les tuiles carte — l'analyse, elle, lit toujours `geom` en pleine résolution.
+Les jeux « INPN — Données du programme … » du MNHN sur data.gouv.fr ne sont que des liens
+vers `inpn.mnhn.fr/docs/Shape/*.zip`, morts (404 constaté le 16/07/2026). data.gouv.fr
+référence en revanche le **WFS PatriNat** (`data.geopf.fr/wfs/ows`), qui sert les mêmes
+zonages nationaux avec un schéma harmonisé : c'est la source retenue, sans manipulation
+manuelle. Import remplaçant (purge de la famille puis recharge), filtré sur la métropole
+par défaut (`--territoire ALL` pour tout importer — le stockage est en Lambert-93, projection
+métropole). `--file` reste possible pour réimporter un extract local hors ligne.
 
 ## Brancher le backend
 
@@ -59,5 +70,8 @@ Les thèmes Environnement et Marché de « Analyser la zone » utilisent alors l
 - `ingest enrich` : POC T-02 — appariement BDNB + SIRENE pour la typologie tertiaire
   (l'import DVF pose déjà les colonnes typologie/source/confiance ; niveau « dvf » seul).
 - `ingest dpe`, `ingest bdnb`, `ingest sirene`.
-- `ingest tiles` : génération PMTiles (tippecanoe, à exécuter sous Linux/WSL ou sur le serveur)
-  pour l'affichage carte des couches batch ; l'analyse de zone, elle, n'en a pas besoin.
+- `ingest tiles` : génération PMTiles (tippecanoe) pour les **gros volumes figés** — points DVF
+  et cadastre. Les zonages INPN, eux, sont servis en tuiles vectorielles directement depuis
+  PostGIS (`GET /api/tiles/env/...`) : rien à générer, et la carte ne peut pas diverger de
+  l'analyse. Tant que ces PMTiles n'existent pas, la couche « Transactions DVF » de la carte
+  reste marquée « flux à confirmer » et n'affiche rien (l'analyse DVF, elle, fonctionne).

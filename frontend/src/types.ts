@@ -10,9 +10,11 @@ export interface LayerDef {
   theme: string;
   libelle: string;
   mode: "live" | "batch";
-  type: "wms" | "xyz" | "pmtiles";
+  type: "wms" | "xyz" | "vector" | "pmtiles";
   url: string;
   wms_layer?: string;
+  /** Couche à lire dans les tuiles vectorielles (types vector et pmtiles). */
+  source_layer?: string;
   attribution?: string;
   flux_confirme: boolean;
 }

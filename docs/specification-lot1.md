@@ -60,7 +60,11 @@ Ces couleurs sont déclarées comme design tokens CSS (`--color-theme-risques-na
 
 ## 3. Catalogue des couches — lot 1
 
-Colonne « Mode » : **live** = appelé à la volée (affichage WMS + interrogation API pour le rapport) ; **batch** = intégré en PostGIS + tuiles PMTiles par le pipeline (§9).
+Colonne « Mode » : **live** = appelé à la volée (affichage WMS + interrogation API pour le rapport) ; **batch** = intégré en PostGIS par le pipeline (§9), puis affiché en tuiles vectorielles.
+
+Deux voies de tuilage pour les couches batch, selon le volume :
+- **MVT servies depuis PostGIS** (`GET /api/tiles/env/{familles}/{z}/{x}/{y}.pbf`, `ST_AsMVT`) pour les zonages INPN (~21 000 polygones) : mêmes données que l'analyse, donc aucun décalage possible entre la carte et les conclusions du rapport, et aucune étape de régénération après import. Généralisation d'affichage : géométrie précalculée à 50 m sous z10 et masquage des zonages de moins de 2×2 pixels (le rapport, lui, lit toujours `geom` en pleine résolution).
+- **PMTiles statiques** (tippecanoe, servies par Caddy) réservées aux gros volumes figés : cadastre, points DVF.
 
 ### 3.1 Risques naturels — `#DB4B4B`
 
@@ -92,12 +96,14 @@ Base API : `https://www.georisques.gouv.fr/api/v1` (documentation : georisques.g
 
 | Couche | Source / flux | Mode |
 |---|---|---|
-| Natura 2000 (ZSC/SIC + ZPS, fusionnés en une couche à deux styles) | Téléchargement INPN (inpn.mnhn.fr, jeux « données de référence ») | batch semestriel |
-| ZNIEFF type I et II | Téléchargement INPN | batch semestriel |
-| Espaces protégés (APB, réserves, parcs, sites classés/inscrits…) | Téléchargement INPN | batch semestriel |
-| Inventaire national du patrimoine géologique | Téléchargement INPN | batch annuel |
+| Natura 2000 (ZSC/SIC + ZPS, fusionnés en une couche à deux styles) | WFS PatriNat (`data.geopf.fr`, couches `patrinat_sic`, `patrinat_zps`) | batch semestriel |
+| ZNIEFF type I et II | WFS PatriNat (`patrinat_znieff1`, `patrinat_znieff2`) | batch semestriel |
+| Espaces protégés (APB, réserves, parcs, conservatoire du littoral…) | WFS PatriNat (`patrinat_pn`, `pnr`, `rnn`, `rnr`, `apb`…) | batch semestriel |
+| Inventaire national du patrimoine géologique | WFS PatriNat (`patrinat_inpg`) | batch annuel |
 
 Choix : batch plutôt que WMS INPN — disponibilité et latence des WMS externes non maîtrisées, volumes faibles, styles homogènes avec notre charte. Le rapport interroge PostGIS (intersections exactes), pas un service tiers.
+
+Source d'acquisition : les archives `inpn.mnhn.fr/docs/Shape/*.zip` référencées par data.gouv.fr sont mortes (404, constaté le 16/07/2026). Le WFS PatriNat, également référencé sur data.gouv.fr, sert les mêmes zonages nationaux avec un schéma harmonisé (`id_mnhn`, `nom_site`, `url_fiche`) et s'automatise sans téléchargement manuel.
 
 ### 3.4 Urbanisme & foncier — `#55579E`
 
@@ -211,7 +217,9 @@ sirene_etablissements(siret PK, denomination, naf, date_debut, etat, adresse_ban
 
 -- Environnement (une table par famille, schéma commun)
 env_zonages(id PK, famille /* natura2000|znieff1|znieff2|espace_protege|patrimoine_geol */,
-            code_national, libelle, url_fiche_inpn, geom MultiPolygon)
+            code_national, libelle, url_fiche_inpn, geom MultiPolygon,
+            geom_gen MultiPolygon /* généralisée ~50 m, affichage carte only */,
+            surface_m2 /* précalculée : filtre de lisibilité des tuiles */)
 
 -- Cadastre (affichage batch ; la fiche parcelle passe par l'API Carto en live)
 parcelles(id_parcelle PK, code_commune, section, numero, contenance, geom MultiPolygon)
@@ -227,6 +235,9 @@ Toutes les géométries en GeoJSON WGS84. Pas d'authentification en lot 1 (rése
 
 ### `GET /layers`
 Catalogue des couches : id, thème, libellé, mode (live/batch), style, millésime, source — le front construit le panneau Couches à partir de cette réponse (ajout d'une couche = configuration, pas de code front).
+
+### `GET /tiles/env/{familles}/{z}/{x}/{y}.pbf`
+Tuiles vectorielles (MVT) des zonages INPN, servies depuis PostGIS (§3). `familles` = liste séparée par des virgules (ex. `znieff1,znieff2`) ; couche MVT `zonages`, attributs `famille`, `code_national`, `libelle`, `url_fiche_inpn`. Tuile sans zonage → `204` (et non `404` : l'absence de donnée est un résultat normal). Famille inconnue → `404`.
 
 ### `POST /zones/analyze`
 ```json
@@ -282,7 +293,7 @@ Chemin type : téléchargement (stockage brut daté sur disque) → contrôles (
 | DPE ADEME | trimestrielle | cron |
 | BDNB | semestrielle | suivi manuel des releases CSTB |
 | SIRENE géolocalisé | mensuelle | cron |
-| INPN (4 familles) | semestrielle | cron |
+| INPN (5 familles) | semestrielle | cron (`ingest inpn --famille …`, WFS PatriNat) |
 | Cadastre Etalab (PMTiles) | trimestrielle | cron |
 
 L'enrichissement typologique (§5) est un job dépendant, relancé après tout import DVF, BDNB ou SIRENE.
@@ -320,6 +331,6 @@ Docker Compose, 5 services : `caddy` (reverse proxy + fichiers statiques front e
 | DPE ADEME | `https://data.ademe.fr` (jeux DPE v2) |
 | BDNB | `https://www.data.gouv.fr/fr/datasets/base-de-donnees-nationale-des-batiments/` |
 | SIRENE géolocalisé | `https://files.data.gouv.fr/geo-sirene/` |
-| INPN téléchargements | `https://inpn.mnhn.fr` (espace « téléchargement ») |
+| Zonages INPN | WFS PatriNat `https://data.geopf.fr/wfs/ows` (couches `patrinat_*`) ; fiches : `https://inpn.mnhn.fr` |
 | Base Adresse Nationale | `https://api-adresse.data.gouv.fr` |
 | Fond de plan vectoriel | OpenFreeMap / Protomaps (OSM) ; orthophotos : WMTS IGN open |

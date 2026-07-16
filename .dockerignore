@@ -1,0 +1,9 @@
+# Contexte de build racine (image web) : n'embarquer que le nécessaire.
+.git
+backend/.venv
+pipeline/.venv
+pipeline/raw
+frontend/node_modules
+frontend/dist
+docs
+*.md

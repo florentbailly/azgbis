@@ -75,6 +75,19 @@ CREATE TABLE IF NOT EXISTS dvf_prix (
 CREATE INDEX IF NOT EXISTS dvf_prix_geom_idx ON dvf_prix USING gist (geom);
 CREATE INDEX IF NOT EXISTS dvf_prix_niveau_idx ON dvf_prix (niveau);
 
+-- File des rapports PDF (spec §8) : l'API dépose, le worker consomme.
+-- Les PDF eux-mêmes vivent dans un volume temporaire purgé après 24 h, jamais en base.
+CREATE TABLE IF NOT EXISTS report_jobs (
+    id      uuid PRIMARY KEY,
+    statut  text NOT NULL DEFAULT 'pending', -- pending | running | done | error
+    demande jsonb NOT NULL,                  -- corps de POST /reports (zone, thèmes, titre…)
+    erreur  text,
+    fichier text,                            -- nom du PDF dans le volume rapports
+    cree    timestamptz NOT NULL DEFAULT now(),
+    maj     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS report_jobs_statut_idx ON report_jobs (statut, cree);
+
 CREATE TABLE IF NOT EXISTS env_zonages (
     id              bigserial PRIMARY KEY,
     famille         text NOT NULL, -- natura2000 | znieff1 | znieff2 | espace_protege | patrimoine_geol

@@ -1,0 +1,30 @@
+# Override pour le VPS public (pré-production OVH) — à combiner avec le compose de base :
+#   docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build
+# Guide complet : docs/deploiement-vps.md. Prérequis : un fichier .env à côté de ce
+# fichier définissant AZGBIS_DB_PASSWORD, SITE_ADDRESS, BASIC_AUTH_USER, BASIC_AUTH_HASH.
+services:
+  web:
+    ports:
+      - "80:80"     # redirection automatique vers HTTPS par Caddy
+      - "443:443"   # accès des experts (basic auth)
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS}
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER}
+      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH}
+    volumes:
+      - ./deploy/Caddyfile.vps:/etc/caddy/Caddyfile:ro
+      - tiles:/srv/tiles:ro
+      # Persistance des certificats Let's Encrypt : sans elle, chaque recréation du
+      # conteneur redemanderait un certificat (limites de délivrance atteintes vite).
+      - caddy_data:/data
+      - caddy_config:/config
+
+  worker:
+    environment:
+      # Les captures de cartes passent par l'écoute interne SANS basic auth (:8080,
+      # non publiée sur l'hôte) — sinon chaque carte du rapport recevrait un 401.
+      RENDER_URL: http://web:8080
+
+volumes:
+  caddy_data:
+  caddy_config:

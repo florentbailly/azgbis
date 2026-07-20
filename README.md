@@ -29,18 +29,20 @@ un **conteneur** est une instance en cours d'exécution d'une image ; un **volum
 les données qui doivent survivre aux conteneurs (ici `azgbis_pgdata` contient la base).
 Chaque conteneur est isolé : `localhost` y désigne le conteneur lui-même.
 
-L'application est composée de 3 conteneurs qui doivent se parler : `postgis` (base),
-`api` (backend, qui joint la base via le nom d'hôte `postgis`) et `web` (Caddy : front +
-reverse proxy `/api`). Ce nom d'hôte n'existe que sur le réseau créé par `podman compose`
-(`azgbis_default`). **Ne pas lancer les conteneurs un par un avec `podman run`** : sans
-réseau commun, l'API ne résout pas `postgis` et la connexion base échoue (le back et le
-front démarrent quand même, seuls les thèmes lisant la base tombent en avertissement).
+L'application est composée de 4 conteneurs qui doivent se parler : `postgis` (base),
+`api` (backend, qui joint la base via le nom d'hôte `postgis`), `web` (Caddy : front +
+reverse proxy `/api`) et `worker` (rapports PDF : Playwright pour les cartes, WeasyPrint
+pour le document — les PDF sont conservés 24 h puis purgés). Ces noms d'hôte n'existent
+que sur le réseau créé par `podman compose` (`azgbis_default`). **Ne pas lancer les
+conteneurs un par un avec `podman run`** : sans réseau commun, l'API ne résout pas
+`postgis` et la connexion base échoue (le back et le front démarrent quand même, seuls
+les thèmes lisant la base tombent en avertissement).
 
 ```powershell
 podman machine start          # après un reboot (Podman tourne dans une VM Linux)
-podman compose up -d          # démarre les 3 conteneurs sur le même réseau
+podman compose up -d          # démarre les 4 conteneurs sur le même réseau
                               #   ajouter --build seulement si le code a changé
-podman ps                     # attendu : 3 conteneurs Up, postgis "(healthy)"
+podman ps                     # attendu : 4 conteneurs Up, postgis "(healthy)"
 podman logs azgbis_api_1      # journaux d'un conteneur en cas de problème
 # tester : http://localhost
 podman compose down           # arrêt propre (les volumes, donc les données, restent)
@@ -66,11 +68,19 @@ podman exec azgbis_postgis_1 pg_dump -U azgbis -Fc azgbis > azgbis.dump   # sur 
 Rejouer les imports est généralement préférable : c'est reproductible et ça récupère les
 millésimes à jour. Le dump sert surtout à éviter de retélécharger de gros volumes.
 
-## Déploiement sur VM Linux (Podman)
+## Déploiement sur un VPS public (OVH…)
+
+Guide pas à pas complet (Docker, HTTPS, mot de passe partagé, imports, recette) :
+[docs/deploiement-vps.md](docs/deploiement-vps.md). L'override
+[docker-compose.vps.yml](docker-compose.vps.yml) ajoute ce qu'exige un serveur exposé à
+Internet : HTTPS automatique et basic auth ([deploy/Caddyfile.vps](deploy/Caddyfile.vps)),
+mot de passe base via `.env`, écoute interne dédiée aux cartes des rapports.
+
+## Déploiement sur VM Linux interne (Podman)
 
 ```bash
 git clone <repo> && cd azgbis
-podman compose up -d --build                              # postgis + api + web (port 80)
+podman compose up -d --build                              # postgis + api + web (port 80) + worker rapports
 podman compose --profile tools run --rm ingest schema     # créer les tables
 podman compose --profile tools run --rm ingest dvf --dept 69 --years 2021-2025
 podman compose --profile tools run --rm ingest contours --dept 69            # carte des prix au m²

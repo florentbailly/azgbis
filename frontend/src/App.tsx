@@ -4,15 +4,38 @@ import AnalysisPanel, { type ParcelInfo } from "./components/AnalysisPanel";
 import LayerPanel from "./components/LayerPanel";
 import MapView from "./components/MapView";
 import ZoneToolbar from "./components/ZoneToolbar";
-import type { AnalyzeResponse, Catalog } from "./types";
-import { initialDraft, loadDraft, saveDraft, toFeatures, toZoneInput, type ZoneDraft } from "./zone";
+import type { AnalyzeResponse, Catalog, ZoneInput } from "./types";
+import { initialDraft, loadDraft, saveDraft, toFeatures, toZoneInput, zoneInputToDraft, type ZoneDraft } from "./zone";
 
 const DEFAULT_THEMES = ["risques_naturels", "risques_technologiques", "environnement", "urbanisme", "marche_ventes"];
 
+/** Mode « rendu » : chargé par le worker de rapports (Playwright) pour les cartes
+ *  statiques du PDF — carte seule, zone et couches imposées par l'URL, aucun panneau.
+ *  Ex. /?rendu=1&couches=natura2000,znieff&zone={"type":"point_radii",…} */
+function lireModeRendu(): { couches: string[]; zone: ZoneInput | null } | null {
+  const q = new URLSearchParams(window.location.search);
+  if (!q.get("rendu")) return null;
+  let zone: ZoneInput | null = null;
+  try {
+    zone = JSON.parse(q.get("zone") ?? "null");
+  } catch {
+    zone = null;
+  }
+  const couches = (q.get("couches") ?? "").split(",").filter(Boolean);
+  return { couches, zone };
+}
+
+const MODE_RENDU = lireModeRendu();
+
 export default function App() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [activeLayerIds, setActiveLayerIds] = useState<Set<string>>(new Set());
-  const [draft, setDraft] = useState<ZoneDraft>(() => loadDraft() ?? initialDraft);
+  const [activeLayerIds, setActiveLayerIds] = useState<Set<string>>(
+    () => new Set(MODE_RENDU?.couches ?? []),
+  );
+  const [draft, setDraft] = useState<ZoneDraft>(() => {
+    if (MODE_RENDU) return MODE_RENDU.zone ? zoneInputToDraft(MODE_RENDU.zone) : initialDraft;
+    return loadDraft() ?? initialDraft;
+  });
   const [selectedThemes, setSelectedThemes] = useState<Set<string>>(new Set(DEFAULT_THEMES));
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -26,7 +49,9 @@ export default function App() {
     fetchCatalog().then(setCatalog).catch((e) => setError(`Catalogue de couches inaccessible : ${e}`));
   }, []);
 
-  useEffect(() => saveDraft(draft), [draft]);
+  useEffect(() => {
+    if (!MODE_RENDU) saveDraft(draft);
+  }, [draft]);
 
   const zoneFeatures = useMemo(() => {
     const fc = toFeatures(draft);
@@ -74,6 +99,23 @@ export default function App() {
     }
   }
 
+  if (MODE_RENDU) {
+    return (
+      <div className="app">
+        <div className="map-container">
+          <MapView
+            catalog={catalog}
+            activeLayerIds={activeLayerIds}
+            zoneFeatures={zoneFeatures}
+            onMapClick={() => undefined}
+            flyTo={null}
+            rendu
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       {leftOpen && (
@@ -118,6 +160,7 @@ export default function App() {
           analysis={analysis}
           error={error}
           parcel={parcel}
+          zoneInput={zoneInput}
           selectedThemes={selectedThemes}
           onToggleTheme={(id) =>
             setSelectedThemes((prev) => {

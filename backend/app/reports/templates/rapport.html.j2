@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<style>
+  /* Charte client (spec §2) — mêmes couleurs que l'écran. */
+  :root {
+    --primaire: #581D74; --primaire-2: #66327A;
+    --vigilance: #DB4B4B; --ok: #00A193; --neutre: #7F7F7F; --bordure: #BFBFBF;
+  }
+  @page {
+    size: A4 portrait; margin: 18mm 15mm 16mm 15mm;
+    @bottom-left { content: string(doc-titre); font-size: 8pt; color: #7F7F7F; }
+    @bottom-right { content: "Page " counter(page) " / " counter(pages); font-size: 8pt; color: #7F7F7F; }
+  }
+  @page garde { @bottom-left { content: none; } @bottom-right { content: none; } }
+  @page paysage {
+    size: A4 landscape; margin: 14mm 12mm;
+    @bottom-right { content: "Page " counter(page) " / " counter(pages); font-size: 8pt; color: #7F7F7F; }
+  }
+  body { font-family: "DejaVu Sans", sans-serif; font-size: 9.5pt; color: #222; margin: 0; }
+  h1, h2 { color: var(--primaire); }
+  h2 { font-size: 14pt; border-left: 4mm solid var(--primaire); padding-left: 4mm; margin: 0 0 4mm; }
+  .section h2 { border-left-color: var(--couleur-theme, var(--primaire)); }
+  h3 { color: var(--primaire-2); font-size: 11pt; margin: 5mm 0 2mm; }
+
+  /* --- Page de garde --- */
+  .garde { page: garde; }
+  .garde .bandeau { background: var(--primaire); color: #fff; padding: 10mm 8mm; margin-bottom: 8mm; }
+  .garde .bandeau h1 { color: #fff; font-size: 20pt; margin: 0; string-set: doc-titre content(); }
+  .garde .bandeau .sous { font-size: 10pt; margin-top: 2mm; opacity: 0.9; }
+  .garde table.meta { border-collapse: collapse; margin: 4mm 0 6mm; }
+  .garde table.meta td { padding: 1mm 4mm 1mm 0; vertical-align: top; }
+  .garde table.meta td.k { color: var(--neutre); white-space: nowrap; }
+  .wkt { font-family: "DejaVu Sans Mono", monospace; font-size: 6.5pt; word-break: break-all; color: #444; }
+
+  .carte { width: 100%; border: 0.3pt solid var(--bordure); margin: 2mm 0 3mm; }
+  .carte-avert { border: 0.3pt dashed var(--vigilance); color: var(--vigilance);
+                 padding: 4mm; font-size: 9pt; margin: 2mm 0 3mm; }
+
+  /* --- Sommaire --- */
+  .sommaire { break-before: page; }
+  .sommaire a { color: #222; text-decoration: none; }
+  .toc-ligne { display: flex; align-items: baseline; margin: 1.6mm 0; }
+  .toc-ligne .points { flex: 1; border-bottom: 0.5pt dotted var(--bordure); margin: 0 2mm; }
+  .toc-ligne a.page::after { content: target-counter(attr(href), page); }
+
+  /* --- Synthèse --- */
+  .synthese { break-before: page; }
+  table.synth { width: 100%; border-collapse: collapse; margin-top: 3mm; }
+  table.synth td { border-bottom: 0.3pt solid #eee; padding: 2.5mm 2mm; vertical-align: top; }
+  .badge { display: inline-block; color: #fff; font-size: 8pt; border-radius: 2pt;
+           padding: 0.8mm 2mm; white-space: nowrap; }
+  .badge.vigilance { background: var(--vigilance); }
+  .badge.ok { background: var(--ok); }
+  .badge.indisponible { background: var(--neutre); }
+
+  /* --- Sections thème --- */
+  .section { break-before: page; }
+  table.ind { width: 100%; border-collapse: collapse; }
+  table.ind td { border-bottom: 0.3pt dotted #ddd; padding: 1.2mm 1mm; }
+  table.ind td.v { text-align: right; font-weight: bold; white-space: nowrap; }
+  table.data { width: 100%; border-collapse: collapse; margin: 2mm 0; font-size: 8.5pt; }
+  table.data th { text-align: left; color: #fff; background: var(--primaire-2); padding: 1.5mm 2mm; }
+  table.data td { border-bottom: 0.3pt solid #eee; padding: 1.2mm 2mm; }
+  table.data td.num, table.data th.num { text-align: right; }
+  .avert { background: #fdf3f3; border-left: 1mm solid #D16B76; padding: 2mm 3mm; margin: 2mm 0; font-size: 9pt; }
+  .item { margin: 1.2mm 0; page-break-inside: avoid; }
+  .item .cat { font-size: 7pt; color: #fff; background: var(--neutre); border-radius: 2pt; padding: 0.4mm 1.5mm; margin-right: 1.5mm; }
+  .item .champs { color: #555; font-size: 8pt; }
+  .note { background: #f7f4fa; padding: 3mm 4mm; font-size: 8.5pt; color: #444; margin-top: 4mm; }
+  .note b { color: var(--primaire); }
+  .muted { color: var(--neutre); font-size: 8.5pt; }
+
+  /* --- Annexes paysage --- */
+  .annexe-paysage { page: paysage; break-before: page; }
+  .annexe { break-before: page; }
+
+  /* --- Traçabilité --- */
+  .tracabilite { break-before: page; }
+  table.sources td { font-size: 8pt; }
+  table.sources td.url { word-break: break-all; color: #444; }
+</style>
+</head>
+<body>
+
+<!-- ══ 1. Page de garde ══════════════════════════════════════════════ -->
+<div class="garde">
+  <div class="bandeau">
+    <h1>{{ titre }}</h1>
+    <div class="sous">Rapport de qualification de zone — piste d'audit</div>
+  </div>
+  <table class="meta">
+    {% if client_ref %}<tr><td class="k">Référence dossier</td><td><b>{{ client_ref }}</b></td></tr>{% endif %}
+    {% if auteur %}<tr><td class="k">Auteur</td><td>{{ auteur }}</td></tr>{% endif %}
+    <tr><td class="k">Généré le</td><td>{{ genere_le }}</td></tr>
+    <tr><td class="k">Zone d'étude</td><td>{{ zone.type }} — {{ zone.surface_etude_ha|fr_nombre }} ha
+        (contexte : {{ zone.surface_contexte_ha|fr_nombre }} ha){% if zone.code_insee %} — commune INSEE {{ zone.code_insee }}{% endif %}</td></tr>
+    <tr><td class="k">Définition exacte</td>
+        <td>{% if zone.type == "Polygone" %}<span class="wkt">{{ zone.detail }}</span>{% else %}{{ zone.detail }}{% endif %}</td></tr>
+  </table>
+  {% if carte_situation %}
+    <img class="carte" src="data:image/png;base64,{{ carte_situation }}" alt="Carte de situation">
+  {% else %}
+    <div class="carte-avert">Carte de situation indisponible au moment de la génération.</div>
+  {% endif %}
+</div>
+
+<!-- ══ 2. Sommaire ══════════════════════════════════════════════════ -->
+<div class="sommaire">
+  <h2>Sommaire</h2>
+  <div class="toc-ligne"><a href="#synthese">Synthèse — points d'attention</a><span class="points"></span><a class="page" href="#synthese"></a></div>
+  {% for s in sections %}
+  <div class="toc-ligne"><a href="#sec-{{ s.id }}">{{ s.libelle }}</a><span class="points"></span><a class="page" href="#sec-{{ s.id }}"></a></div>
+  {% endfor %}
+  {% if transactions %}
+  <div class="toc-ligne"><a href="#annexe-dvf">Annexe — transactions DVF</a><span class="points"></span><a class="page" href="#annexe-dvf"></a></div>
+  {% endif %}
+  {% if icpe_sis %}
+  <div class="toc-ligne"><a href="#annexe-icpe">Annexe — installations et sites (Géorisques)</a><span class="points"></span><a class="page" href="#annexe-icpe"></a></div>
+  {% endif %}
+  <div class="toc-ligne"><a href="#tracabilite">Traçabilité des données</a><span class="points"></span><a class="page" href="#tracabilite"></a></div>
+</div>
+
+<!-- ══ 3. Synthèse ══════════════════════════════════════════════════ -->
+<div class="synthese" id="synthese">
+  <h2>Synthèse — points d'attention</h2>
+  <p class="muted">Lecture rapide : <span class="badge vigilance">à examiner</span> signale un élément à
+    instruire dans la section correspondante ; <span class="badge ok">rien de notable</span> signifie
+    qu'aucun élément saillant n'a été détecté par les sources interrogées. Ce tableau ne remplace pas
+    l'analyse détaillée des sections.</p>
+  <table class="synth">
+    {% for pt in synthese %}
+    <tr>
+      <td style="white-space:nowrap"><b>{{ pt.libelle }}</b></td>
+      <td style="white-space:nowrap">
+        {% if pt.niveau == "vigilance" %}<span class="badge vigilance">à examiner</span>
+        {% elif pt.niveau == "ok" %}<span class="badge ok">rien de notable</span>
+        {% else %}<span class="badge indisponible">données indisponibles</span>{% endif %}
+      </td>
+      <td>{{ pt.message }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% for a in avert_cartes %}<div class="avert">{{ a }}</div>{% endfor %}
+</div>
+
+<!-- ══ 4. Une section par thème ═════════════════════════════════════ -->
+{% for s in sections %}
+<div class="section" id="sec-{{ s.id }}" style="--couleur-theme: {{ s.couleur }}">
+  <h2>{{ s.libelle }}</h2>
+  {% if s.carte %}
+    <img class="carte" src="data:image/png;base64,{{ s.carte }}" alt="Carte {{ s.libelle }}">
+  {% else %}
+    <div class="carte-avert">Carte du thème indisponible au moment de la génération (voir synthèse).</div>
+  {% endif %}
+
+  {% if s.indicateurs %}
+  <table class="ind">
+    {% for label, val in s.indicateurs %}
+    <tr><td>{{ label }}</td><td class="v">{{ val }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if s.par_typologie %}
+  <h3>Prix par typologie (zone de contexte)</h3>
+  <table class="data">
+    <tr><th>Typologie</th><th class="num">Ventes</th><th class="num">Prix/m² médian</th><th>Période</th></tr>
+    {% for t in s.par_typologie %}
+    <tr><td>{{ t.typologie }}</td><td class="num">{{ t.nb_transactions|fr_nombre }}</td>
+        <td class="num">{% if t.prix_m2_median %}{{ t.prix_m2_median|fr_nombre }} €{% else %}—{% endif %}</td>
+        <td>{{ t.periode[0] }} → {{ t.periode[1] }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if s.zones_plu %}
+  <h3>Zonage PLU</h3>
+  {% for z in s.zones_plu %}<div class="item"><b>{{ z.libelle }}</b>{% if z.nb and z.nb > 1 %} ×{{ z.nb }}{% endif %}
+    {% if z.libelong %}<div class="champs">{{ z.libelong }}</div>{% endif %}</div>{% endfor %}
+  {% endif %}
+  {% if s.servitudes %}
+  <h3>Servitudes d'utilité publique</h3>
+  {% for z in s.servitudes %}<div class="item"><b>{{ z.libelle }}</b>{% if z.nb and z.nb > 1 %} ×{{ z.nb }}{% endif %}</div>{% endfor %}
+  {% endif %}
+  {% if s.prescriptions %}
+  <h3>Prescriptions d'urbanisme</h3>
+  {% for z in s.prescriptions %}<div class="item"><b>{{ z.libelle }}</b>{% if z.nb and z.nb > 1 %} ×{{ z.nb }}{% endif %}</div>{% endfor %}
+  {% endif %}
+
+  {% for a in s.avertissements %}<div class="avert">{{ a }}</div>{% endfor %}
+
+  {% if s.elements %}
+  <h3>Éléments recensés{% if s.nb_items_total > s.elements|length %} ({{ s.elements|length }} premiers sur {{ s.nb_items_total }} — liste complète en annexe){% endif %}</h3>
+  {% for i in s.elements %}
+  <div class="item">{% if i.categorie %}<span class="cat">{{ i.categorie }}</span>{% endif %}<b>{{ i.titre }}</b>
+    {% if i.champs %}<div class="champs">{{ i.champs }}</div>{% endif %}</div>
+  {% endfor %}
+  {% endif %}
+
+  {% if s.note_methodo %}<div class="note"><b>Méthode.</b> {{ s.note_methodo }}</div>{% endif %}
+</div>
+{% endfor %}
+
+<!-- ══ 5. Annexes ═══════════════════════════════════════════════════ -->
+{% if transactions %}
+<div class="annexe-paysage" id="annexe-dvf">
+  <h2>Annexe — transactions DVF de la zone de contexte ({{ transactions|length }})</h2>
+  <table class="data">
+    <tr><th>Date</th><th>Mutation</th><th>Nature</th><th class="num">Valeur foncière</th>
+        <th>Typologie</th><th>Confiance</th><th class="num">Surface bâtie</th><th class="num">Prix/m²</th><th>DPE</th></tr>
+    {% for t in transactions %}
+    <tr>
+      <td>{{ t.date_mutation }}</td><td>{{ t.id_mutation }}</td><td>{{ t.nature_mutation|fmt }}</td>
+      <td class="num">{% if t.valeur_fonciere %}{{ t.valeur_fonciere|int|fr_nombre }} €{% else %}—{% endif %}</td>
+      <td>{{ t.typologie|fmt }}</td><td>{{ t.typologie_confiance|fmt }}</td>
+      <td class="num">{% if t.surface_reelle_bati %}{{ t.surface_reelle_bati|int|fr_nombre }} m²{% else %}—{% endif %}</td>
+      <td class="num">{% if t.prix_m2 %}{{ t.prix_m2|int|fr_nombre }} €{% else %}—{% endif %}</td>
+      <td>{{ t.dpe_classe|fmt }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="muted">Mêmes règles de calcul que le thème Marché : prix/m² renseigné uniquement pour les
+    mutations mono-local bâti. Liste plafonnée aux 200 transactions les plus récentes.</p>
+</div>
+{% endif %}
+
+{% if icpe_sis %}
+<div class="annexe" id="annexe-icpe">
+  <h2>Annexe — installations et sites recensés (identifiants Géorisques)</h2>
+  {% for i in icpe_sis %}
+  <div class="item">{% if i.categorie %}<span class="cat">{{ i.categorie }}</span>{% endif %}<b>{{ i.titre }}</b>
+    {% if i.champs %}<div class="champs">{{ i.champs }}</div>{% endif %}</div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- ══ 6. Traçabilité (piste d'audit) ═══════════════════════════════ -->
+<div class="tracabilite" id="tracabilite">
+  <h2>Traçabilité des données</h2>
+  <p>Rapport généré le <b>{{ genere_le }}</b> par l'outil de qualification de zone,
+     version <b>{{ version_app }}</b>. Pour les sources « batch », le millésime indiqué est celui du
+     dernier import en base ; pour les sources « live », les API publiques ont été interrogées au
+     moment exact de la génération.</p>
+  <table class="data sources">
+    <tr><th>Source</th><th>Millésime / appel</th><th>Accès</th></tr>
+    {% for s in tracabilite %}
+    <tr><td>{{ s.libelle }}</td><td>{{ s.millesime }}</td><td class="url">{{ s.url }}</td></tr>
+    {% endfor %}
+  </table>
+  <div class="note">
+    <b>Méthodologie d'enrichissement typologique (spec §5).</b> Chaque local DVF porte une typologie,
+    sa source et un niveau de confiance. Au niveau actuel (« dvf »), les maisons et appartements sont
+    classés « residentiel » (confiance haute) ; les locaux industriels et commerciaux restent
+    « tertiaire_non_qualifie » (confiance nulle) dans l'attente de l'appariement BDNB/SIRENE.
+    Ces trois colonnes figurent dans l'export Excel et dans l'annexe transactions.
+  </div>
+  <div class="note">
+    <b>Limites.</b> Les données mobilisées sont exclusivement issues de l'open data ; leur exhaustivité
+    et leur fraîcheur sont celles des producteurs cités. Ce rapport est un support d'instruction,
+    il ne constitue pas à lui seul une expertise.
+  </div>
+</div>
+
+</body>
+</html>

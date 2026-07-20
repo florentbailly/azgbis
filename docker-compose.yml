@@ -8,7 +8,11 @@ services:
     image: docker.io/postgis/postgis:16-3.4
     environment:
       POSTGRES_USER: azgbis
-      POSTGRES_PASSWORD: azgbis
+      # Dev local : défaut "azgbis". En production (VPS/VM), définir AZGBIS_DB_PASSWORD
+      # dans un fichier .env à côté de ce compose (jamais commité) — voir
+      # docs/deploiement-vps.md. Le mot de passe ne sert que sur le réseau interne
+      # des conteneurs, mais un vrai secret reste de rigueur hors du poste de dev.
+      POSTGRES_PASSWORD: ${AZGBIS_DB_PASSWORD:-azgbis}
       POSTGRES_DB: azgbis
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -24,10 +28,35 @@ services:
   api:
     build: ./backend
     environment:
-      DATABASE_URL: postgresql://azgbis:azgbis@postgis:5432/azgbis
+      DATABASE_URL: postgresql://azgbis:${AZGBIS_DB_PASSWORD:-azgbis}@postgis:5432/azgbis
+      REPORTS_DIR: /reports
+    volumes:
+      - reports:/reports:ro
     depends_on:
       postgis:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Rapports PDF (spec §8) : consomme la file report_jobs, capture les cartes en
+  # chargeant le front (service web) via Playwright, écrit les PDF dans le volume
+  # `reports` que l'API sert en téléchargement. Purge automatique après 24 h.
+  # Contexte ./worker (dépendances seules) : podman-compose ignore `build.dockerfile`
+  # (re-constaté le 16/07/2026 — il construit le Dockerfile du contexte) ; le code
+  # backend est monté en volume, le worker exécute donc le même code que l'API.
+  worker:
+    build: ./worker
+    environment:
+      DATABASE_URL: postgresql://azgbis:${AZGBIS_DB_PASSWORD:-azgbis}@postgis:5432/azgbis
+      RENDER_URL: http://web:80
+      REPORTS_DIR: /reports
+    volumes:
+      - ./backend/app:/app/app:ro
+      - reports:/reports
+    depends_on:
+      postgis:
+        condition: service_healthy
+      web:
+        condition: service_started
     restart: unless-stopped
 
   web:
@@ -48,7 +77,7 @@ services:
     build: ./pipeline
     profiles: ["tools"]
     environment:
-      DATABASE_URL: postgresql://azgbis:azgbis@postgis:5432/azgbis
+      DATABASE_URL: postgresql://azgbis:${AZGBIS_DB_PASSWORD:-azgbis}@postgis:5432/azgbis
     depends_on:
       postgis:
         condition: service_healthy
@@ -60,3 +89,4 @@ volumes:
   pgdata:
   raw:
   tiles:
+  reports:

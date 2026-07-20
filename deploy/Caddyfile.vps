@@ -1,0 +1,57 @@
+# Caddyfile du VPS public (pré-production OVH) — utilisé via docker-compose.vps.yml,
+# qui le monte à la place de deploy/Caddyfile (réservé, lui, au réseau interne).
+#
+# Deux écoutes :
+#   1. {$SITE_ADDRESS} (443, certificat automatique) : accès des experts, protégé par
+#      basic auth — l'outil n'a pas d'authentification propre avant le lot 2, et un
+#      VPS public est ouvert à tout Internet.
+#   2. :8080 SANS auth : réservé au worker de rapports (captures de cartes). Ce port
+#      n'est PAS publié sur l'hôte — il n'existe que sur le réseau Docker interne.
+#      Ne jamais l'ajouter aux `ports:` du service web.
+#
+# Variables lues dans l'environnement du conteneur (définies via .env, jamais commises) :
+#   SITE_ADDRESS     ex. vps-a1b2c3d4.vps.ovh.net
+#   BASIC_AUTH_USER  ex. azgbis
+#   BASIC_AUTH_HASH  produit par : caddy hash-password --plaintext '…'
+
+{$SITE_ADDRESS} {
+	encode gzip
+
+	basic_auth {
+		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+	}
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle_path /tiles/* {
+		root * /srv/tiles
+		file_server
+	}
+
+	handle {
+		root * /srv/www
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+http://:8080 {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle_path /tiles/* {
+		root * /srv/tiles
+		file_server
+	}
+
+	handle {
+		root * /srv/www
+		try_files {path} /index.html
+		file_server
+	}
+}

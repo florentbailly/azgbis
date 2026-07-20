@@ -1,4 +1,6 @@
-import type { AnalyzeResponse, Catalog, ThemeResult } from "../types";
+import { useEffect, useState } from "react";
+import { createReport, getReportStatus } from "../api";
+import type { AnalyzeResponse, Catalog, ThemeResult, ZoneInput } from "../types";
 
 interface ParcelInfo {
   parcelle: any;
@@ -15,6 +17,7 @@ interface Props {
   parcel: ParcelInfo | null;
   selectedThemes: Set<string>;
   onToggleTheme: (id: string) => void;
+  zoneInput: ZoneInput | null;
 }
 
 export type { ParcelInfo };
@@ -204,7 +207,79 @@ function ThemeBlock({ result, color, libelle }: { result: ThemeResult; color: st
   );
 }
 
-export default function AnalysisPanel({ catalog, analysis, error, parcel, selectedThemes, onToggleTheme }: Props) {
+/** Génération du rapport PDF (spec §8) : formulaire de page de garde, dépôt du job,
+ *  suivi jusqu'au lien de téléchargement. Le PDF est purgé côté serveur après 24 h. */
+function ReportBlock({ zoneInput, themes }: { zoneInput: ZoneInput | null; themes: string[] }) {
+  const [titre, setTitre] = useState("");
+  const [clientRef, setClientRef] = useState("");
+  const [auteur, setAuteur] = useState("");
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [status, setStatus] = useState<string>("");
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [erreur, setErreur] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!jobId || downloadUrl || (status && !["pending", "running"].includes(status))) return;
+    const t = setInterval(async () => {
+      try {
+        const s = await getReportStatus(jobId);
+        setStatus(s.status);
+        if (s.status === "done") setDownloadUrl(s.download_url ?? null);
+        if (s.status === "error") setErreur(s.erreur ?? "Erreur inconnue pendant la génération.");
+      } catch (e) {
+        setErreur(String(e));
+        setStatus("error");
+      }
+    }, 3000);
+    return () => clearInterval(t);
+  }, [jobId, status, downloadUrl]);
+
+  async function lancer() {
+    if (!zoneInput || themes.length === 0) return;
+    setErreur(null);
+    setDownloadUrl(null);
+    setStatus("pending");
+    try {
+      setJobId(await createReport(zoneInput, themes, { titre, client_ref: clientRef, auteur }));
+    } catch (e) {
+      setErreur(String(e));
+      setStatus("error");
+      setJobId(null);
+    }
+  }
+
+  const enCours = ["pending", "running"].includes(status) && !downloadUrl;
+  return (
+    <div className="result-theme">
+      <h3 style={{ background: "var(--brand-primary)" }}>Rapport PDF</h3>
+      <div className="result-body">
+        <input type="text" className="report-input" placeholder="Titre du rapport"
+               value={titre} onChange={(e) => setTitre(e.target.value)} />
+        <input type="text" className="report-input" placeholder="Référence dossier client"
+               value={clientRef} onChange={(e) => setClientRef(e.target.value)} />
+        <input type="text" className="report-input" placeholder="Auteur"
+               value={auteur} onChange={(e) => setAuteur(e.target.value)} />
+        <button onClick={lancer} disabled={!zoneInput || themes.length === 0 || enCours} style={{ width: "100%" }}>
+          {enCours ? "Génération en cours…" : "Générer le rapport"}
+        </button>
+        {enCours && (
+          <p className="muted">
+            {status === "pending" ? "En file d'attente…" : "Analyse et cartes en cours (moins de 3 min)…"}
+          </p>
+        )}
+        {downloadUrl && (
+          <p>
+            <a href={downloadUrl}><b>Télécharger le rapport PDF</b></a>
+            <span className="muted"> — conservé 24 h, puis purgé.</span>
+          </p>
+        )}
+        {erreur && <div className="warning">{erreur}</div>}
+      </div>
+    </div>
+  );
+}
+
+export default function AnalysisPanel({ catalog, analysis, error, parcel, selectedThemes, onToggleTheme, zoneInput }: Props) {
   const analyseThemes = catalog?.themes.filter((t) => t.analyse) ?? [];
   return (
     <div className="panel panel-right">
@@ -254,6 +329,7 @@ export default function AnalysisPanel({ catalog, analysis, error, parcel, select
             {" · "}contexte : {((analysis.zone_resume.surface_zone_contexte_m2 as number) / 10000).toFixed(1)} ha
             {analysis.zone_resume.code_insee_centre ? ` · commune ${analysis.zone_resume.code_insee_centre}` : ""}
           </div>
+          <ReportBlock zoneInput={zoneInput} themes={[...selectedThemes]} />
           {analysis.resultats.map((r) => {
             const t = catalog?.themes.find((x) => x.id === r.theme);
             return <ThemeBlock key={r.theme} result={r} color={t?.couleur ?? "#7F7F7F"} libelle={t?.libelle ?? r.theme} />;

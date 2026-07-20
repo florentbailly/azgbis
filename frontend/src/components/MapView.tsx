@@ -54,13 +54,40 @@ interface Props {
   zoneFeatures: GeoJSON.FeatureCollection;
   onMapClick: (lon: number, lat: number) => void;
   flyTo: [number, number] | null;
+  /** Mode « rendu » (cartes du rapport PDF) : cadre la zone, masque les contrôles de
+   *  navigation, affiche la légende des couches actives et signale la fin du chargement
+   *  en posant #rendu-pret (attendu par Playwright côté worker). */
+  rendu?: boolean;
 }
 
-export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapClick, flyTo }: Props) {
+/** Emprise englobante d'une FeatureCollection (lon/lat). */
+function bboxDe(fc: GeoJSON.FeatureCollection): [[number, number], [number, number]] | null {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const visite = (c: unknown): void => {
+    if (Array.isArray(c) && typeof c[0] === "number") {
+      const [x, y] = c as [number, number];
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    } else if (Array.isArray(c)) {
+      c.forEach(visite);
+    }
+  };
+  for (const f of fc.features) visite((f.geometry as { coordinates?: unknown }).coordinates);
+  return Number.isFinite(minX) ? [[minX, minY], [maxX, maxY]] : null;
+}
+
+export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapClick, flyTo, rendu }: Props) {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const readyRef = useRef(false);
   const clickRef = useRef(onMapClick);
   clickRef.current = onMapClick;
+  // Le gestionnaire `load` est une fermeture du premier rendu : il lirait un catalogue
+  // encore null si le fetch aboutit après l'init de la carte. Les refs suivent la valeur courante.
+  const catalogRef = useRef(catalog);
+  catalogRef.current = catalog;
+  const activeRef = useRef(activeLayerIds);
+  activeRef.current = activeLayerIds;
+  const renduArmeRef = useRef(false);
 
   useEffect(() => {
     const map = new maplibregl.Map({
@@ -73,7 +100,7 @@ export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapCl
       hash: true,
       attributionControl: { compact: true },
     });
-    map.addControl(new maplibregl.NavigationControl(), "top-right");
+    if (!rendu) map.addControl(new maplibregl.NavigationControl(), "top-right");
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }));
     map.on("click", (e) => clickRef.current(e.lngLat.lng, e.lngLat.lat));
     // Infobulle des prix : le prix médian au m² de la maille survolée (couche marquée
@@ -136,8 +163,12 @@ export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapCl
         paint: { "circle-radius": 5, "circle-color": "#581D74", "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 },
       });
       readyRef.current = true;
-      syncOverlays(map, catalog, activeLayerIds);
+      syncOverlays(map, catalogRef.current, activeRef.current);
       (map.getSource(ZONE_SOURCE) as maplibregl.GeoJSONSource).setData(zoneFeatures);
+      if (rendu) {
+        const bbox = bboxDe(zoneFeatures);
+        if (bbox) map.fitBounds(bbox, { padding: 60, animate: false, maxZoom: 16 });
+      }
     });
     mapRef.current = map;
     return () => { readyRef.current = false; map.remove(); };
@@ -148,6 +179,30 @@ export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapCl
     const map = mapRef.current;
     if (map && readyRef.current) syncOverlays(map, catalog, activeLayerIds);
   }, [catalog, activeLayerIds]);
+
+  // Mode rendu : n'armer le signal de fin (#rendu-pret) qu'une fois carte ET catalogue
+  // prêts — sinon Playwright capturerait une carte sans ses couches thématiques.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!rendu || !catalog || !map || renduArmeRef.current) return;
+    const armer = () => {
+      if (renduArmeRef.current) return;
+      renduArmeRef.current = true;
+      // `idle` = plus aucune tuile en attente : la carte est capturable. La petite
+      // marge couvre le fondu d'apparition des tuiles raster.
+      map.once("idle", () => {
+        setTimeout(() => {
+          const marqueur = document.createElement("div");
+          marqueur.id = "rendu-pret";
+          document.body.appendChild(marqueur);
+        }, 400);
+      });
+      // Si la carte était déjà au repos, `idle` ne serait jamais réémis : forcer un cycle.
+      map.triggerRepaint();
+    };
+    if (readyRef.current) armer();
+    else map.once("load", armer);
+  }, [rendu, catalog]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -162,9 +217,32 @@ export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapCl
 
   // Légende de la carte des prix, affichée dès que la couche choroplèthe est active.
   const prixActif = !!catalog?.layers.some((l) => l.rendu === "prix_m2" && activeLayerIds.has(l.id));
+  // Mode rendu : légende des couches actives (la couche prix a déjà la sienne).
+  const couchesLegende =
+    rendu && catalog ? catalog.layers.filter((l) => activeLayerIds.has(l.id) && l.rendu !== "prix_m2") : [];
   return (
     <>
       <div id="map" />
+      {couchesLegende.length > 0 && (
+        <div className="rendu-legende">
+          {couchesLegende.map((l) => (
+            <div key={l.id} className="rendu-legende-item">
+              <div className="rendu-legende-nom">
+                {l.type !== "wms" && (
+                  <span className="rendu-swatch" style={{ background: themeColor(catalog!, l.theme) }} />
+                )}
+                {l.libelle}
+              </div>
+              {l.type === "wms" && l.url.includes("georisques") && (
+                <img
+                  alt=""
+                  src={`${l.url}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetLegendGraphic&FORMAT=image/png&LAYER=${encodeURIComponent(l.wms_layer ?? "")}`}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       {prixActif && (
         <div className="prix-legende">
           <div className="prix-legende-titre">Prix médian — ventes DVF (€/m²)</div>

@@ -1,24 +1,18 @@
 """API de l'outil de qualification de zone — lot 1 (spec docs/specification-lot1.md §7)."""
 import asyncio
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from . import catalog, config, db, tiles
-from .analyze import environnement, marche_ventes, risques_naturels, risques_technologiques, urbanisme
+from .analysis import run_analysis
 from .clients import apicarto, http
 from .clients.http import SourceError
-from .geo import resolve_zone
-from .schemas import AnalyzeRequest, AnalyzeResponse, ThemeResult
-
-ANALYZERS = {
-    "risques_naturels": risques_naturels.analyze,
-    "risques_technologiques": risques_technologiques.analyze,
-    "environnement": environnement.analyze,
-    "urbanisme": urbanisme.analyze,
-    "marche_ventes": marche_ventes.analyze,
-}
+from .reports import store as report_store
+from .schemas import AnalyzeRequest, AnalyzeResponse, ReportRequest
 
 
 @asynccontextmanager
@@ -50,24 +44,7 @@ async def layers() -> dict:
 async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     if not req.themes:
         raise HTTPException(400, "Aucun thème demandé.")
-    zone = resolve_zone(req.zone)
-
-    lon, lat = zone.centroid_lonlat
-    code_insee: str | None = None
-    commune_warning: str | None = None
-    try:
-        commune = await apicarto.commune_at(lon, lat)
-        code_insee = commune["code"] if commune else None
-    except SourceError as e:
-        commune_warning = f"Identification de la commune impossible : {e}"
-
-    results: list[ThemeResult] = list(
-        await asyncio.gather(*(ANALYZERS[t](zone, code_insee) for t in req.themes))
-    )
-    if commune_warning:
-        for r in results:
-            r.avertissements.insert(0, commune_warning)
-    return AnalyzeResponse(zone_resume=zone.resume | {"code_insee_centre": code_insee}, resultats=results)
+    return await run_analysis(req)
 
 
 @app.get("/api/parcelles/lookup")
@@ -122,10 +99,44 @@ async def dvf_transactions() -> dict:
     raise HTTPException(501, "Filtres DVF : implémentation prévue après l'import du premier millésime (sprint 2).")
 
 
-@app.post("/api/reports", status_code=501)
-async def create_report() -> dict:
-    raise HTTPException(
-        501,
-        "Génération de rapport : sprint 3 du lot 1 (worker Playwright + WeasyPrint, spec §8). "
-        "Utiliser /api/zones/analyze en attendant.",
-    )
+# --- Rapports PDF (spec §8) : l'API dépose le job, le worker dédié le consomme. -----
+
+@app.post("/api/reports", status_code=202)
+async def create_report(req: ReportRequest) -> dict:
+    if not req.themes:
+        raise HTTPException(400, "Aucun thème demandé.")
+    p = await db.pool()
+    if p is None:
+        raise HTTPException(503, "Rapports indisponibles : " + db.NO_DB_WARNING)
+    job_id = await report_store.creer(p, req)
+    return {"job_id": job_id}
+
+
+@app.get("/api/reports/{job_id}")
+async def report_status(job_id: str) -> dict:
+    p = await db.pool()
+    if p is None:
+        raise HTTPException(503, db.NO_DB_WARNING)
+    job = await report_store.lire(p, job_id)
+    if job is None:
+        raise HTTPException(404, "Rapport inconnu (les rapports sont purgés après 24 h).")
+    out = {"status": job["statut"]}
+    if job["statut"] == "done":
+        out["download_url"] = f"/api/reports/{job_id}/download"
+    if job["statut"] == "error":
+        out["erreur"] = job["erreur"]
+    return out
+
+
+@app.get("/api/reports/{job_id}/download")
+async def report_download(job_id: str) -> FileResponse:
+    p = await db.pool()
+    if p is None:
+        raise HTTPException(503, db.NO_DB_WARNING)
+    job = await report_store.lire(p, job_id)
+    if job is None or job["statut"] != "done" or not job["fichier"]:
+        raise HTTPException(404, "Rapport indisponible (non terminé, en erreur, ou purgé après 24 h).")
+    path = report_store.chemin_pdf(job["fichier"])
+    if not path.exists():
+        raise HTTPException(404, "Fichier purgé (les rapports sont conservés 24 h).")
+    return FileResponse(path, media_type="application/pdf", filename=job["fichier"])

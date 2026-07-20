@@ -16,6 +16,34 @@ export async function analyzeZone(zone: ZoneInput, themes: string[]): Promise<An
   return r.json();
 }
 
+export interface ReportMeta {
+  titre: string;
+  client_ref: string;
+  auteur: string;
+}
+
+export interface ReportStatus {
+  status: "pending" | "running" | "done" | "error";
+  download_url?: string;
+  erreur?: string;
+}
+
+export async function createReport(zone: ZoneInput, themes: string[], meta: ReportMeta): Promise<string> {
+  const r = await fetch("/api/reports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ zone, themes, ...meta }),
+  });
+  if (!r.ok) throw new Error(`POST /api/reports → ${r.status}: ${await r.text()}`);
+  return (await r.json()).job_id;
+}
+
+export async function getReportStatus(jobId: string): Promise<ReportStatus> {
+  const r = await fetch(`/api/reports/${jobId}`);
+  if (!r.ok) throw new Error(`GET /api/reports/${jobId} → ${r.status}`);
+  return r.json();
+}
+
 export interface BanSuggestion {
   label: string;
   lon: number;

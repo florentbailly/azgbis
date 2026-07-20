@@ -65,6 +65,27 @@ export function toFeatures(d: ZoneDraft): GeoJSON.FeatureCollection {
   return { type: "FeatureCollection", features };
 }
 
+/** Mode « rendu » (rapport PDF) : reconstruit un tracé depuis la zone passée en URL. */
+export function zoneInputToDraft(z: ZoneInput): ZoneDraft {
+  if (z.type === "point_radii") {
+    return {
+      ...initialDraft,
+      mode: "point",
+      center: z.center,
+      smallRadiusM: z.small_radius_m,
+      largeRadiusM: z.large_radius_m,
+    };
+  }
+  const ring = z.geometry.coordinates[0] as [number, number][];
+  // L'anneau GeoJSON est fermé (dernier point = premier) ; le tracé ne stocke pas la fermeture.
+  return {
+    ...initialDraft,
+    mode: "polygon",
+    polygonPoints: ring.slice(0, -1),
+    polygonClosed: true,
+  };
+}
+
 const STORAGE_KEY = "azgbis.derniere_zone";
 
 /** Zones privées sans compte (lot 1) : persistance navigateur uniquement. */

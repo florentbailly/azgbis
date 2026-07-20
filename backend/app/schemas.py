@@ -54,3 +54,11 @@ class ThemeResult(BaseModel):
 class AnalyzeResponse(BaseModel):
     zone_resume: dict[str, Any]
     resultats: list[ThemeResult]
+
+
+class ReportRequest(AnalyzeRequest):
+    """Corps de POST /reports (spec §7) : celui d'analyze + les champs de page de garde."""
+
+    client_ref: str = ""
+    titre: str = ""
+    auteur: str = ""

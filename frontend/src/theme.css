@@ -118,6 +118,7 @@ button:disabled { background: var(--border-neutral); cursor: not-allowed; }
 }
 .item-card .item-fields { color: #444; margin-top: 1px; }
 .muted { color: var(--text-secondary); font-size: 11.5px; }
+.report-input { width: 100%; margin-bottom: 5px; padding: 4px 6px; border: 1px solid var(--border-neutral); border-radius: 4px; }
 .zone-resume { background: #f7f4fa; border-radius: 6px; padding: 6px 9px; margin-bottom: 8px; }
 
 /* Listes de synthèse (zones PLU, prescriptions, servitudes) */
@@ -127,6 +128,17 @@ button:disabled { background: var(--border-neutral); cursor: not-allowed; }
 .synth-list .nb { color: var(--text-secondary); margin-left: 4px; }
 .synth-list .desc { color: #555; font-size: 11px; display: block; }
 .synth-title { font-weight: 600; color: var(--brand-primary); margin-top: 6px; }
+
+/* Légende du mode rendu (cartes statiques du rapport PDF) */
+.rendu-legende {
+  position: absolute; right: 10px; top: 10px; z-index: 10;
+  background: rgba(255,255,255,0.95); border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.25);
+  padding: 8px 10px; font-size: 11px; max-width: 240px; max-height: 85%; overflow: hidden;
+}
+.rendu-legende-item { margin-bottom: 5px; }
+.rendu-legende-nom { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.rendu-legende img { max-width: 100%; margin-top: 2px; }
+.rendu-swatch { width: 14px; height: 11px; border-radius: 2px; flex: none; opacity: 0.75; }
 
 /* Légende de la carte des prix DVF (au-dessus de l'échelle MapLibre, en bas à gauche) */
 .prix-legende {

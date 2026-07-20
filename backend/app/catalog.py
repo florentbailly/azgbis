@@ -133,11 +133,19 @@ LAYERS: list[dict] = [
     },
 ]
 
+# `couches_rapport` : couches activées sur la carte statique de la section du thème
+# dans le rapport PDF (spec §8 ②). Volontairement restreint — superposer les 6 WMS
+# de risques naturels rendrait la carte illisible ; l'expert garde tout à l'écran.
 THEMES = [
-    {"id": "risques_naturels", "libelle": "Risques naturels", "couleur": THEME_COLORS["risques_naturels"], "analyse": True},
-    {"id": "risques_technologiques", "libelle": "Risques technologiques", "couleur": THEME_COLORS["risques_technologiques"], "analyse": True},
-    {"id": "environnement", "libelle": "Environnement & biodiversité", "couleur": THEME_COLORS["environnement"], "analyse": True},
-    {"id": "urbanisme", "libelle": "Urbanisme & foncier", "couleur": THEME_COLORS["urbanisme"], "analyse": True},
-    {"id": "marche_ventes", "libelle": "Marché — ventes (DVF)", "couleur": THEME_COLORS["marche_ventes"], "analyse": True},
-    {"id": "fonds", "libelle": "Fonds de carte", "couleur": "#7F7F7F", "analyse": False},
+    {"id": "risques_naturels", "libelle": "Risques naturels", "couleur": THEME_COLORS["risques_naturels"], "analyse": True,
+     "couches_rapport": ["rga", "ppri_zonage"]},
+    {"id": "risques_technologiques", "libelle": "Risques technologiques", "couleur": THEME_COLORS["risques_technologiques"], "analyse": True,
+     "couches_rapport": ["icpe", "sis", "pprt_zonage"]},
+    {"id": "environnement", "libelle": "Environnement & biodiversité", "couleur": THEME_COLORS["environnement"], "analyse": True,
+     "couches_rapport": ["natura2000", "znieff", "espaces_proteges", "patrimoine_geol"]},
+    {"id": "urbanisme", "libelle": "Urbanisme & foncier", "couleur": THEME_COLORS["urbanisme"], "analyse": True,
+     "couches_rapport": ["zonage_plu"]},
+    {"id": "marche_ventes", "libelle": "Marché — ventes (DVF)", "couleur": THEME_COLORS["marche_ventes"], "analyse": True,
+     "couches_rapport": ["dvf"]},
+    {"id": "fonds", "libelle": "Fonds de carte", "couleur": "#7F7F7F", "analyse": False, "couches_rapport": []},
 ]

@@ -17,9 +17,11 @@
 {$SITE_ADDRESS} {
 	encode gzip
 
-	basic_auth {
-		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
-	}
+	# --- Basic auth temporairement désactivé (site ouvert au web) -----------------
+	# Pour réactiver : décommenter le bloc ci-dessous puis `restart web`.
+	# basic_auth {
+	# 	{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+	# }
 
 	handle /api/* {
 		reverse_proxy api:8000

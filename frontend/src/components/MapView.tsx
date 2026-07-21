@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Protocol } from "pmtiles";
+import { fetchDvfPeriode } from "../api";
 import type { Catalog, LayerDef } from "../types";
 
 maplibregl.addProtocol("pmtiles", new Protocol().tile);
@@ -33,6 +34,32 @@ export const PRIX_CLASSES = PRIX_COLORS.map((c, i) => ({
         ? `≥ ${PRIX_BREAKS[i - 1].toLocaleString("fr-FR")}`
         : `${PRIX_BREAKS[i - 1].toLocaleString("fr-FR")} – ${PRIX_BREAKS[i].toLocaleString("fr-FR")}`,
 }));
+
+/** Période de ventes appliquée à la carte des prix ; null = toutes les ventes. */
+type Periode = { debut: string; fin: string } | null;
+
+/** Mois « AAAA-MM » couverts par les bornes (curseurs du filtre de période). */
+function moisEntre(min: string, max: string): string[] {
+  const out: string[] = [];
+  const d = new Date(`${min.slice(0, 7)}-01T12:00:00`);
+  const dernier = max.slice(0, 7);
+  for (let i = 0; i < 600; i++) {
+    const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    out.push(m);
+    if (m === dernier) break;
+    d.setMonth(d.getMonth() + 1);
+  }
+  return out;
+}
+
+function dernierJourDuMois(mois: string): string {
+  const [a, m] = mois.split("-").map(Number);
+  return `${mois}-${String(new Date(a, m, 0).getDate()).padStart(2, "0")}`;
+}
+
+function frDate(iso: string): string {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString("fr-FR");
+}
 
 const ZONE_SOURCE = "zone";
 const ZONE_LAYERS = [
@@ -89,6 +116,14 @@ export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapCl
   activeRef.current = activeLayerIds;
   const renduArmeRef = useRef(false);
 
+  // Filtre de période de la carte des prix : bornes disponibles (min/max des ventes
+  // importées) et période choisie. null = toutes les ventes (tuiles précalculées).
+  const [bornes, setBornes] = useState<{ min: string; max: string } | null>(null);
+  const [periode, setPeriode] = useState<Periode>(null);
+  const prixSuffixe = periode ? `?debut=${periode.debut}&fin=${periode.fin}` : "";
+  const prixSuffixeRef = useRef(prixSuffixe);
+  prixSuffixeRef.current = prixSuffixe;
+
   useEffect(() => {
     const map = new maplibregl.Map({
       container: "map",
@@ -103,27 +138,32 @@ export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapCl
     if (!rendu) map.addControl(new maplibregl.NavigationControl(), "top-right");
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }));
     map.on("click", (e) => clickRef.current(e.lngLat.lng, e.lngLat.lat));
-    // Infobulle des prix : le prix médian au m² de la maille survolée (couche marquée
-    // rendu prix_m2 via ses métadonnées, quel que soit son id de catalogue).
+    // Infobulle des choroplèthes : couches marquées par leurs métadonnées `rendu`
+    // (prix_m2 ou classes), quel que soit leur id de catalogue.
     const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, maxWidth: "280px" });
     map.on("mousemove", (e) => {
       const ids = map
         .getStyle()
-        .layers.filter((ly) => (ly.metadata as { rendu?: string } | undefined)?.rendu === "prix_m2")
+        .layers.filter((ly) => (ly.metadata as { rendu?: string } | undefined)?.rendu)
         .map((ly) => ly.id);
       const f = ids.length ? map.queryRenderedFeatures(e.point, { layers: ids })[0] : undefined;
       if (!f) {
         popup.remove();
         return;
       }
-      const p = f.properties as { prix_m2: number; nb_ventes: number; libelle?: string; code: string };
-      popup
-        .setLngLat(e.lngLat)
-        .setText(
+      const meta = (f.layer.metadata ?? {}) as { rendu?: string; couche?: string };
+      const p = f.properties as Record<string, unknown>;
+      let texte: string;
+      if (meta.rendu === "prix_m2") {
+        texte =
           `${Number(p.prix_m2).toLocaleString("fr-FR")} €/m² médian — ` +
-            `${p.nb_ventes} vente${Number(p.nb_ventes) > 1 ? "s" : ""} (${p.libelle ?? p.code})`,
-        )
-        .addTo(map);
+          `${p.nb_ventes} vente${Number(p.nb_ventes) > 1 ? "s" : ""} (${p.libelle ?? p.code})`;
+      } else {
+        const def = catalogRef.current?.layers.find((l) => l.id === meta.couche);
+        const cl = def?.classes?.find((c) => c.classe === Number(p.classe));
+        texte = `${cl?.libelle ?? `Classe ${p.classe}`} — ${p.libelle ?? p.code}`;
+      }
+      popup.setLngLat(e.lngLat).setText(texte).addTo(map);
     });
     map.on("load", () => {
       map.addSource(ZONE_SOURCE, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
@@ -163,7 +203,7 @@ export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapCl
         paint: { "circle-radius": 5, "circle-color": "#581D74", "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 },
       });
       readyRef.current = true;
-      syncOverlays(map, catalogRef.current, activeRef.current);
+      syncOverlays(map, catalogRef.current, activeRef.current, prixSuffixeRef.current);
       (map.getSource(ZONE_SOURCE) as maplibregl.GeoJSONSource).setData(zoneFeatures);
       if (rendu) {
         const bbox = bboxDe(zoneFeatures);
@@ -177,8 +217,24 @@ export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapCl
 
   useEffect(() => {
     const map = mapRef.current;
-    if (map && readyRef.current) syncOverlays(map, catalog, activeLayerIds);
+    if (map && readyRef.current) syncOverlays(map, catalog, activeLayerIds, prixSuffixeRef.current);
   }, [catalog, activeLayerIds]);
+
+  // Changement de période : recharger les tuiles de la couche prix sans la recréer.
+  // Débounce : un glissement de curseur ne doit pas déclencher une requête par cran.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !catalog) return;
+    const t = setTimeout(() => {
+      if (!readyRef.current) return;
+      for (const l of catalog.layers) {
+        if (l.rendu !== "prix_m2") continue;
+        const src = map.getSource(`src-${l.id}`) as maplibregl.VectorTileSource | undefined;
+        src?.setTiles?.([`${window.location.origin}${l.url}${prixSuffixe}`]);
+      }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [prixSuffixe, catalog]);
 
   // Mode rendu : n'armer le signal de fin (#rendu-pret) qu'une fois carte ET catalogue
   // prêts — sinon Playwright capturerait une carte sans ses couches thématiques.
@@ -215,11 +271,21 @@ export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapCl
     if (flyTo && mapRef.current) mapRef.current.flyTo({ center: flyTo, zoom: 15 });
   }, [flyTo]);
 
-  // Légende de la carte des prix, affichée dès que la couche choroplèthe est active.
+  // Légendes des choroplèthes, affichées dès que la couche correspondante est active.
   const prixActif = !!catalog?.layers.some((l) => l.rendu === "prix_m2" && activeLayerIds.has(l.id));
-  // Mode rendu : légende des couches actives (la couche prix a déjà la sienne).
+  const couchesClasses =
+    catalog?.layers.filter((l) => l.rendu === "classes" && !!l.classes?.length && activeLayerIds.has(l.id)) ?? [];
+
+  // Bornes du filtre de période, chargées à la première activation de la couche prix.
+  useEffect(() => {
+    if (!prixActif || bornes || rendu) return;
+    fetchDvfPeriode().then((p) => {
+      if (p.min && p.max) setBornes({ min: p.min, max: p.max });
+    });
+  }, [prixActif, bornes, rendu]);
+  // Mode rendu : légende des couches actives (les choroplèthes ont déjà la leur).
   const couchesLegende =
-    rendu && catalog ? catalog.layers.filter((l) => activeLayerIds.has(l.id) && l.rendu !== "prix_m2") : [];
+    rendu && catalog ? catalog.layers.filter((l) => activeLayerIds.has(l.id) && !l.rendu) : [];
   return (
     <>
       <div id="map" />
@@ -243,26 +309,104 @@ export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapCl
           ))}
         </div>
       )}
-      {prixActif && (
-        <div className="prix-legende">
-          <div className="prix-legende-titre">Prix médian — ventes DVF (€/m²)</div>
-          {PRIX_CLASSES.map((c) => (
-            <div key={c.couleur} className="prix-legende-ligne">
-              <span className="prix-legende-carre" style={{ background: c.couleur }} />
-              {c.libelle}
+      {(prixActif || couchesClasses.length > 0) && (
+        <div className="legendes">
+          {couchesClasses.map((l) => (
+            <div key={l.id} className="prix-legende">
+              <div className="prix-legende-titre">{l.libelle}</div>
+              {l.classes!.map((c) => (
+                <div key={c.classe} className="prix-legende-ligne">
+                  <span className="prix-legende-carre" style={{ background: c.couleur }} />
+                  {c.libelle}
+                </div>
+              ))}
+              {l.note_legende && <div className="prix-legende-note">{l.note_legende}</div>}
             </div>
           ))}
-          <div className="prix-legende-note">
-            Maille selon le zoom : département → commune → section cadastrale → parcelle.
-            Aucune couleur = aucune vente connue.
-          </div>
+          {prixActif && (
+            <div className="prix-legende">
+              <div className="prix-legende-titre">Prix médian — ventes DVF (€/m²)</div>
+              {PRIX_CLASSES.map((c) => (
+                <div key={c.couleur} className="prix-legende-ligne">
+                  <span className="prix-legende-carre" style={{ background: c.couleur }} />
+                  {c.libelle}
+                </div>
+              ))}
+              {!rendu && bornes && (
+                <PeriodeControles bornes={bornes} periode={periode} onChange={setPeriode} />
+              )}
+              <div className="prix-legende-note">
+                {periode ? `Ventes du ${frDate(periode.debut)} au ${frDate(periode.fin)}. ` : ""}
+                Maille selon le zoom : département → commune → section cadastrale → parcelle.
+                Aucune couleur = aucune vente connue.
+              </div>
+            </div>
+          )}
         </div>
       )}
     </>
   );
 }
 
-function syncOverlays(map: maplibregl.Map, catalog: Catalog | null, active: Set<string>) {
+/** Filtre de période de la carte des prix : un curseur (pas mensuel) + un champ date
+ *  par borne. Revenir aux bornes complètes équivaut à « toute la période » (tuiles
+ *  précalculées, plus rapides). */
+function PeriodeControles({ bornes, periode, onChange }: {
+  bornes: { min: string; max: string };
+  periode: Periode;
+  onChange: (p: Periode) => void;
+}) {
+  const mois = moisEntre(bornes.min, bornes.max);
+  const debut = periode?.debut ?? bornes.min;
+  const fin = periode?.fin ?? bornes.max;
+  const idx = (d: string, defaut: number) => {
+    const i = mois.indexOf(d.slice(0, 7));
+    return i >= 0 ? i : defaut;
+  };
+  const poser = (d: string, f: string) =>
+    onChange(d <= bornes.min && f >= bornes.max ? null : { debut: d, fin: f });
+  return (
+    <div className="prix-periode">
+      <div className="prix-periode-ligne">
+        <span className="prix-periode-lib">Du</span>
+        <input
+          type="range" min={0} max={mois.length - 1} value={idx(debut, 0)}
+          onChange={(e) => {
+            const m = mois[Number(e.target.value)];
+            const d = `${m}-01`;
+            poser(d, d > fin ? dernierJourDuMois(m) : fin);
+          }}
+        />
+        <input
+          type="date" min={bornes.min} max={bornes.max} value={debut}
+          onChange={(e) => e.target.value && poser(e.target.value, e.target.value > fin ? e.target.value : fin)}
+        />
+      </div>
+      <div className="prix-periode-ligne">
+        <span className="prix-periode-lib">Au</span>
+        <input
+          type="range" min={0} max={mois.length - 1} value={idx(fin, mois.length - 1)}
+          onChange={(e) => {
+            const m = mois[Number(e.target.value)];
+            const f = dernierJourDuMois(m);
+            poser(f < debut ? `${m}-01` : debut, f);
+          }}
+        />
+        <input
+          type="date" min={bornes.min} max={bornes.max} value={fin}
+          onChange={(e) => e.target.value && poser(e.target.value < debut ? e.target.value : debut, e.target.value)}
+        />
+      </div>
+      {periode && (
+        <button className="prix-periode-reset" onClick={() => onChange(null)}>
+          Toute la période
+        </button>
+      )}
+    </div>
+  );
+}
+
+function syncOverlays(map: maplibregl.Map, catalog: Catalog | null, active: Set<string>, prixSuffixe: string) {
   if (!catalog) return;
   for (const l of catalog.layers) {
     const layerId = `overlay-${l.id}`;
@@ -309,7 +453,7 @@ function syncOverlays(map: maplibregl.Map, catalog: Catalog | null, active: Set<
           // d'en demander de nouvelles — inutile de solliciter la base à chaque zoom.
           map.addSource(sourceId, {
             type: "vector",
-            tiles: [`${window.location.origin}${l.url}`],
+            tiles: [`${window.location.origin}${l.url}${l.rendu === "prix_m2" ? prixSuffixe : ""}`],
             minzoom: 5,
             maxzoom: 14,
             attribution: l.attribution ?? "",
@@ -318,7 +462,24 @@ function syncOverlays(map: maplibregl.Map, catalog: Catalog | null, active: Set<
           map.addSource(sourceId, { type: "vector", url: `pmtiles://${l.url}`, attribution: l.attribution ?? "" });
         }
         const sourceLayer = l.source_layer ?? l.id;
-        if (l.rendu === "prix_m2") {
+        if (l.rendu === "classes" && l.classes?.length) {
+          // Choroplèthe catégorielle générique : couleurs et libellés portés par le
+          // catalogue — aucune connaissance de la donnée (radon…) côté front.
+          const matchExpr = [
+            "match", ["get", "classe"],
+            ...l.classes.flatMap((c) => [c.classe, c.couleur]),
+            "#7F7F7F",
+          ] as unknown as maplibregl.ExpressionSpecification;
+          map.addLayer({
+            id: layerId, type: "fill", source: sourceId, "source-layer": sourceLayer,
+            metadata: { rendu: "classes", couche: l.id },
+            paint: { "fill-color": matchExpr, "fill-opacity": 0.55 },
+          });
+          map.addLayer({
+            id: `${layerId}-line`, type: "line", source: sourceId, "source-layer": sourceLayer,
+            paint: { "line-color": "#7F7F7F", "line-width": 0.4, "line-opacity": 0.5 },
+          });
+        } else if (l.rendu === "prix_m2") {
           // Choroplèthe : couleur par classe de prix. Les mailles sans vente ne sont
           // simplement pas dans les tuiles — rien n'est dessiné là où on ne sait rien.
           const stepExpr = [

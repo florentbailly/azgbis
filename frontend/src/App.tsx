@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { analyzeZone, fetchCatalog } from "./api";
+import { analyzeZone, fetchCatalog, fetchSources, type SourceFraicheur } from "./api";
 import AnalysisPanel, { type ParcelInfo } from "./components/AnalysisPanel";
 import LayerPanel from "./components/LayerPanel";
 import MapView from "./components/MapView";
 import ZoneToolbar from "./components/ZoneToolbar";
 import type { AnalyzeResponse, Catalog, ZoneInput } from "./types";
-import { initialDraft, loadDraft, saveDraft, toFeatures, toZoneInput, zoneInputToDraft, type ZoneDraft } from "./zone";
+import { initialDraft, loadDraft, parcelleToZone, saveDraft, toFeatures, toZoneInput, zoneInputToDraft, type ZoneDraft } from "./zone";
 
 const DEFAULT_THEMES = ["risques_naturels", "risques_technologiques", "environnement", "urbanisme", "marche_ventes"];
 
@@ -42,11 +42,14 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [parcel, setParcel] = useState<ParcelInfo | null>(null);
   const [flyTo, setFlyTo] = useState<[number, number] | null>(null);
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+  // Petit écran : les panneaux deviennent des tiroirs et démarrent fermés (la carte d'abord).
+  const [leftOpen, setLeftOpen] = useState(() => !window.matchMedia("(max-width: 900px)").matches);
+  const [rightOpen, setRightOpen] = useState(() => !window.matchMedia("(max-width: 900px)").matches);
+  const [sources, setSources] = useState<SourceFraicheur[]>([]);
 
   useEffect(() => {
     fetchCatalog().then(setCatalog).catch((e) => setError(`Catalogue de couches inaccessible : ${e}`));
+    fetchSources().then(setSources).catch(() => setSources([]));
   }, []);
 
   useEffect(() => {
@@ -65,7 +68,12 @@ export default function App() {
     }
     return fc;
   }, [draft, parcel]);
-  const zoneInput = useMemo(() => toZoneInput(draft), [draft]);
+  // Mode « Parcelle » : la zone d'analyse est la parcelle sélectionnée elle-même
+  // (le tracé ne produit rien dans ce mode — le bouton restait grisé à tort).
+  const zoneInput = useMemo(
+    () => (draft.mode === "select" ? parcelleToZone(parcel?.parcelle?.geometry) : toZoneInput(draft)),
+    [draft, parcel],
+  );
 
   function updateDraft(d: ZoneDraft) {
     setDraft(d);
@@ -122,6 +130,8 @@ export default function App() {
         <LayerPanel
           catalog={catalog}
           activeLayerIds={activeLayerIds}
+          sources={sources}
+          onClose={() => setLeftOpen(false)}
           onToggle={(id) =>
             setActiveLayerIds((prev) => {
               const next = new Set(prev);
@@ -161,6 +171,7 @@ export default function App() {
           error={error}
           parcel={parcel}
           zoneInput={zoneInput}
+          onClose={() => setRightOpen(false)}
           selectedThemes={selectedThemes}
           onToggleTheme={(id) =>
             setSelectedThemes((prev) => {

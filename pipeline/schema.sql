@@ -75,6 +75,38 @@ CREATE TABLE IF NOT EXISTS dvf_prix (
 CREATE INDEX IF NOT EXISTS dvf_prix_geom_idx ON dvf_prix USING gist (geom);
 CREATE INDEX IF NOT EXISTS dvf_prix_niveau_idx ON dvf_prix (niveau);
 
+-- Contours administratifs France entière (etalab, simplifiés 100 m) : support des
+-- choroplèthes par classes (radon…). Séparés de `contours` (cadastre), dont l'import
+-- et les suppressions sont départementaux et liés au DVF.
+CREATE TABLE IF NOT EXISTS admin_contours (
+    id          bigserial PRIMARY KEY,
+    niveau      text NOT NULL, -- commune | departement
+    code        text NOT NULL, -- code INSEE
+    libelle     text,
+    source_id   int REFERENCES sources(id),
+    geom        geometry(MultiPolygon, 2154),
+    UNIQUE (niveau, code)
+);
+CREATE INDEX IF NOT EXISTS admin_contours_geom_idx ON admin_contours USING gist (geom);
+
+-- Choroplèthes par classes (générique) : une ligne par maille et par couche de données
+-- (ex. couche 'radon', classes 1-3). Rempli par les ingest dédiés (radon…), servi par
+-- /api/tiles/classes/{couche}. La maille est précalculée par niveau : le front bascule
+-- département → commune selon le zoom.
+CREATE TABLE IF NOT EXISTS carto_classes (
+    id          bigserial PRIMARY KEY,
+    couche      text NOT NULL,
+    niveau      text NOT NULL,
+    code        text NOT NULL,
+    libelle     text,
+    classe      smallint NOT NULL,
+    source_id   int REFERENCES sources(id),
+    geom        geometry(MultiPolygon, 2154),
+    UNIQUE (couche, niveau, code)
+);
+CREATE INDEX IF NOT EXISTS carto_classes_geom_idx ON carto_classes USING gist (geom);
+CREATE INDEX IF NOT EXISTS carto_classes_couche_idx ON carto_classes (couche, niveau);
+
 -- File des rapports PDF (spec §8) : l'API dépose, le worker consomme.
 -- Les PDF eux-mêmes vivent dans un volume temporaire purgé après 24 h, jamais en base.
 CREATE TABLE IF NOT EXISTS report_jobs (

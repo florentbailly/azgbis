@@ -65,6 +65,21 @@ export function toFeatures(d: ZoneDraft): GeoJSON.FeatureCollection {
   return { type: "FeatureCollection", features };
 }
 
+/** Zone d'analyse du mode « Parcelle » : la géométrie cadastrale de la parcelle
+ *  sélectionnée. Si le cadastre renvoie un multi-polygone (rare), on garde le plus
+ *  grand morceau — l'API d'analyse n'accepte qu'un polygone simple. */
+export function parcelleToZone(geometry: GeoJSON.Geometry | null | undefined): ZoneInput | null {
+  if (!geometry) return null;
+  if (geometry.type === "Polygon") return { type: "polygon", geometry };
+  if (geometry.type === "MultiPolygon") {
+    const plusGrand = geometry.coordinates
+      .map((c) => turf.polygon(c))
+      .reduce((a, b) => (turf.area(a) >= turf.area(b) ? a : b));
+    return { type: "polygon", geometry: plusGrand.geometry };
+  }
+  return null;
+}
+
 /** Mode « rendu » (rapport PDF) : reconstruit un tracé depuis la zone passée en URL. */
 export function zoneInputToDraft(z: ZoneInput): ZoneDraft {
   if (z.type === "point_radii") {

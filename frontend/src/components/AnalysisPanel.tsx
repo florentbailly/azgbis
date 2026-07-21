@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { createReport, getReportStatus } from "../api";
+import { useEffect, useState, type ReactNode } from "react";
+import { createReport, downloadTransactionsExcel, getReportStatus } from "../api";
 import type { AnalyzeResponse, Catalog, ThemeResult, ZoneInput } from "../types";
 
 interface ParcelInfo {
@@ -18,6 +18,7 @@ interface Props {
   selectedThemes: Set<string>;
   onToggleTheme: (id: string) => void;
   zoneInput: ZoneInput | null;
+  onClose: () => void;
 }
 
 export type { ParcelInfo };
@@ -134,7 +135,36 @@ function SynthList({ title, entries }: { title: string; entries: any[] }) {
   );
 }
 
-function ThemeBlock({ result, color, libelle }: { result: ThemeResult; color: string; libelle: string }) {
+/** Bouton d'export Excel des transactions (section Marché — ventes). */
+function ExportTransactions({ zoneInput }: { zoneInput: ZoneInput | null }) {
+  const [enCours, setEnCours] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+  if (!zoneInput) return null;
+  return (
+    <div style={{ margin: "6px 0" }}>
+      <button
+        className="secondary"
+        disabled={enCours}
+        onClick={async () => {
+          setEnCours(true);
+          setErreur(null);
+          try {
+            await downloadTransactionsExcel(zoneInput);
+          } catch (e) {
+            setErreur(String(e));
+          } finally {
+            setEnCours(false);
+          }
+        }}
+      >
+        {enCours ? "Préparation du fichier…" : "⬇ Télécharger les transactions (Excel)"}
+      </button>
+      {erreur && <div className="warning">{erreur}</div>}
+    </div>
+  );
+}
+
+function ThemeBlock({ result, color, libelle, extra }: { result: ThemeResult; color: string; libelle: string; extra?: ReactNode }) {
   const ind = result.indicateurs;
   return (
     <div className="result-theme">
@@ -184,6 +214,7 @@ function ThemeBlock({ result, color, libelle }: { result: ThemeResult; color: st
           </table>
         )}
 
+        {extra}
         {result.avertissements.map((a, i) => (
           <div className="warning" key={i}>{a}</div>
         ))}
@@ -279,10 +310,11 @@ function ReportBlock({ zoneInput, themes }: { zoneInput: ZoneInput | null; theme
   );
 }
 
-export default function AnalysisPanel({ catalog, analysis, error, parcel, selectedThemes, onToggleTheme, zoneInput }: Props) {
+export default function AnalysisPanel({ catalog, analysis, error, parcel, selectedThemes, onToggleTheme, zoneInput, onClose }: Props) {
   const analyseThemes = catalog?.themes.filter((t) => t.analyse) ?? [];
   return (
     <div className="panel panel-right">
+      <button className="panel-close" onClick={onClose}>✕ fermer</button>
       <div className="app-title">Analyse de zone</div>
       <div>
         {analyseThemes.map((t) => (
@@ -332,7 +364,15 @@ export default function AnalysisPanel({ catalog, analysis, error, parcel, select
           <ReportBlock zoneInput={zoneInput} themes={[...selectedThemes]} />
           {analysis.resultats.map((r) => {
             const t = catalog?.themes.find((x) => x.id === r.theme);
-            return <ThemeBlock key={r.theme} result={r} color={t?.couleur ?? "#7F7F7F"} libelle={t?.libelle ?? r.theme} />;
+            return (
+              <ThemeBlock
+                key={r.theme}
+                result={r}
+                color={t?.couleur ?? "#7F7F7F"}
+                libelle={t?.libelle ?? r.theme}
+                extra={r.theme === "marche_ventes" ? <ExportTransactions zoneInput={zoneInput} /> : undefined}
+              />
+            );
           })}
         </>
       )}

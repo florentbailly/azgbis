@@ -75,15 +75,58 @@ LAYERS: list[dict] = [
     # au-delà) et `renforcement` assombrit/sature le rendu, sinon invisible sur OSM.
     _wms("eaip", "risques_naturels", "Inondations potentielles (EAIP)", "MASQ_EAIP",
          zoom_natif_min=11, zoom_natif_max=12, renforcement=True, opacite=0.9),
-    _wms("ppri_zonage", "risques_naturels", "Zonage réglementaire PPR Inondation", "PPRN_ZONE_INOND"),
-    _wms("mvt", "risques_naturels", "Mouvements de terrain", "MVT_LOCALISE", "Géorisques / BRGM"),
+    # `zoom_natif_min` des zonages PPR : le WMS ne les sert qu'à partir du 1:100 000
+    # (MaxScaleDenominator au GetCapabilities, vérifié le 20/07/2026) — inutile de
+    # demander des tuiles vides en dessous du zoom 13.
+    _wms("ppri_zonage", "risques_naturels", "Zonage réglementaire PPR Inondation", "PPRN_ZONE_INOND",
+         zoom_natif_min=13),
+    _wms("tri_debordement", "risques_naturels", "Surface inondable TRI — crue centennale", "ALEA_SYNT_01_02MOY_FXX",
+         zoom_natif_min=11),
+    _wms("mvt", "risques_naturels", "Mouvements de terrain", "MVT_LOCALISE", "Géorisques / BRGM",
+         zoom_natif_min=10),
     _wms("cavites", "risques_naturels", "Cavités souterraines", "CAVITE_LOCALISEE", "Géorisques / BRGM"),
+    _wms("pprn_mvt_zonage", "risques_naturels", "Zonage réglementaire PPR Mouvement de terrain", "PPRN_ZONE_MVT",
+         zoom_natif_min=13),
+    _wms("pprn_feu_zonage", "risques_naturels", "Zonage réglementaire PPR Feu de forêt", "PPRN_ZONE_FEU",
+         zoom_natif_min=13),
+    _wms("pprn_littoral_zonage", "risques_naturels", "Zonage réglementaire PPR Littoraux (submersion)", "PPRN_ZONE_SUBMAR",
+         zoom_natif_min=13),
+    _wms("sismicite", "risques_naturels", "Zonage sismique réglementaire", "risq_zonage_sismique"),
+    # Radon : servi depuis la base (ingest admin + ingest radon) et non plus par le WMS
+    # Géorisques — celui-ci redessinait ~35 000 communes par tuile à l'échelle France
+    # (plusieurs secondes par image). Choroplèthe générique « classes » : maille
+    # département ≤ z8 (classe majoritaire), commune ensuite.
+    {
+        "id": "radon",
+        "theme": "risques_naturels",
+        "libelle": "Potentiel radon (communes)",
+        "mode": "batch",
+        "type": "vector",
+        "url": "/api/tiles/classes/radon/{z}/{x}/{y}.pbf",
+        "source_layer": "classes",
+        "rendu": "classes",
+        # Rampe ordinale chaude clair→foncé (validée dataviz : luminosité monotone,
+        # séparation daltonisme ≥ 14), distincte du violet séquentiel des prix.
+        "classes": [
+            {"classe": 1, "couleur": "#EDC96B", "libelle": "Catégorie 1 — potentiel faible"},
+            {"classe": 2, "couleur": "#E0862F", "libelle": "Catégorie 2 — faible, facteurs aggravants"},
+            {"classe": 3, "couleur": "#C03B2E", "libelle": "Catégorie 3 — potentiel significatif"},
+        ],
+        "note_legende": "Maille département (classe majoritaire des communes) puis commune selon le zoom.",
+        "attribution": "Géorisques / IRSN",
+        "flux_confirme": True,
+    },
     # --- Risques technologiques -------------------------------------------------
     _wms("icpe", "risques_technologiques", "Installations classées (ICPE / Seveso)", "INSTALLATIONS_CLASSEES_SIMPLIFIE"),
     _wms("sis", "risques_technologiques", "Secteurs d'information sur les sols (SIS)", "SSP_CLASSIFICATION_SIS"),
     _wms("casias", "risques_technologiques", "Anciens sites industriels (CASIAS)", "SSP_ETABLISSEMENT"),
     _wms("basol", "risques_technologiques", "Sites pollués — action publique (ex-BASOL)", "SSP_INSTRUCTION"),
-    _wms("pprt_zonage", "risques_technologiques", "Zonage réglementaire PPR technologique", "PPRT_ZONE_RISQIND"),
+    _wms("pprt_zonage", "risques_technologiques", "Zonage réglementaire PPR technologique", "PPRT_ZONE_RISQIND",
+         zoom_natif_min=13),
+    _wms("pprm_zonage", "risques_technologiques", "Zonage réglementaire PPR minier", "PPRM_ZONE_MINIER",
+         zoom_natif_min=13),
+    _wms("canalisations", "risques_technologiques", "Canalisations de matières dangereuses", "CANALISATIONS"),
+    _wms("inb", "risques_technologiques", "Installations nucléaires de base (INB)", "INSTALLATIONS_NUCLEAIRES"),
     # --- Urbanisme & foncier ----------------------------------------------------
     {
         "id": "zonage_plu",

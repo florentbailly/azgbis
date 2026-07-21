@@ -1,0 +1,2 @@
+# Outils de développement (non installés dans les images de production)
+pytest>=8

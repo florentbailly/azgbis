@@ -36,6 +36,12 @@ class AnalyzeRequest(BaseModel):
     themes: list[Theme]
 
 
+class ExportRequest(BaseModel):
+    """Corps de POST /dvf/export.xlsx : la zone seule (le thème est implicite)."""
+
+    zone: ZoneInput
+
+
 class SourceRef(BaseModel):
     code: str
     libelle: str

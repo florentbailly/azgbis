@@ -226,6 +226,12 @@ contours(id PK, niveau /* parcelle|section|commune|departement */, code, libelle
          geom MultiPolygon /* cadastre Etalab ; parcelles limitées à celles vendues */)
 dvf_prix(id PK, niveau, code, libelle, nb_ventes,
          prix_m2_median /* même définition que le thème Marché */, geom MultiPolygon)
+
+-- Choroplèthes par classes (affichage uniquement)
+admin_contours(id PK, niveau /* commune|departement */, code /* INSEE */, libelle,
+               geom MultiPolygon /* etalab, simplifié 100 m, France entière */)
+carto_classes(id PK, couche /* ex. radon */, niveau, code, libelle, classe smallint,
+              geom MultiPolygon /* rempli par l'ingest de la couche */)
 ```
 
 Index : GIST sur toutes les `geom` ; B-tree sur `code_commune`, `date_mutation`, `typologie`. Chaque table batch référence `sources.id` du millésime courant ; les imports sont **remplaçants** (nouvelle table, bascule par renommage) pour ne jamais servir un état partiel.
@@ -244,6 +250,17 @@ Tuiles vectorielles (MVT) des zonages INPN, servies depuis PostGIS (§3). `famil
 
 ### `GET /tiles/dvf/{z}/{x}/{y}.pbf`
 Tuiles vectorielles de la carte des prix : couche MVT `prix`, attributs `niveau`, `code`, `libelle`, `nb_ventes`, `prix_m2` (médiane, même définition que le thème Marché). Le niveau d'agrégation dépend du zoom demandé : `departement` (z ≤ 8), `commune` (9-11), `section` (12-13), `parcelle` (≥ 14). Les mailles sont précalculées dans `dvf_prix` par `ingest contours` et rafraîchies par chaque `ingest dvf`. Tuile sans vente → `204`.
+
+Paramètres optionnels `?debut=AAAA-MM-JJ&fin=AAAA-MM-JJ` (filtre de période du front) : les médianes sont alors recalculées à la volée sur les seules mutations de la période, avec les mêmes jointures que le précalcul, restreintes aux contours de la tuile. `fin < debut` → `400`.
+
+### `GET /tiles/classes/{couche}/{z}/{x}/{y}.pbf`
+Choroplèthes par classes (générique) : couche MVT `classes`, attributs `niveau`, `code`, `libelle`, `classe`. Mailles précalculées dans `carto_classes` par l'ingest de la couche (ex. `radon` : classe 1-3 par commune via `ingest radon`, classe majoritaire par département). Bascule département → commune selon le zoom (seuil par couche, côté backend). La légende (couleurs, libellés de classes, note de méthode) est portée par le catalogue `/layers` : ajouter une donnée communale = un ingest + une entrée catalogue, zéro code front. Couche inconnue → `404`, tuile vide → `204`.
+
+### `GET /dvf/periode`
+Bornes temporelles des mutations importées (`{"min": "2021-01-04", "max": "2025-12-31"}`, `null` si base vide) : alimente le curseur de période de la carte des prix.
+
+### `GET /sources`
+Fraîcheur des données importées en base : par code source (`dvf`, `cadastre`, `inpn_*`…), le millésime couvert (plage pour le DVF multi-années) et la date du dernier import. Affiché dans le panneau Couches ; les couches live (WMS/WMTS) ont la fraîcheur du service officiel au moment de l'affichage.
 
 ### `POST /zones/analyze`
 ```json
@@ -301,6 +318,8 @@ Chemin type : téléchargement (stockage brut daté sur disque) → contrôles (
 | SIRENE géolocalisé | mensuelle | cron |
 | INPN (5 familles) | semestrielle | cron (`ingest inpn --famille …`, WFS PatriNat) |
 | Contours cadastre Etalab (carte des prix) | trimestrielle | cron (`ingest contours --dept …`) |
+| Contours administratifs Etalab (choroplèthes par classes) | annuelle | cron (`ingest admin`, millésime COG) |
+| Potentiel radon IRSN | annuelle | cron (`ingest radon`, donnée quasi statique — arrêté de 2018) |
 
 L'enrichissement typologique (§5) est un job dépendant, relancé après tout import DVF, BDNB ou SIRENE.
 

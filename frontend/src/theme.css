@@ -80,6 +80,11 @@ body {
   padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; width: 300px;
 }
 .toolbar-row { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.toolbar-plier {
+  background: #fff; color: var(--brand-primary); border: 1px solid var(--border-neutral);
+  padding: 3px 7px; flex: none; line-height: 1;
+}
+.toolbar-repliee { width: auto; padding: 4px; }
 .toolbar input[type="number"] { width: 72px; padding: 3px; border: 1px solid var(--border-neutral); border-radius: 4px; }
 .toolbar input[type="text"] { flex: 1; padding: 5px; border: 1px solid var(--border-neutral); border-radius: 4px; }
 
@@ -140,11 +145,15 @@ button:disabled { background: var(--border-neutral); cursor: not-allowed; }
 .rendu-legende img { max-width: 100%; margin-top: 2px; }
 .rendu-swatch { width: 14px; height: 11px; border-radius: 2px; flex: none; opacity: 0.75; }
 
-/* Légende de la carte des prix DVF (au-dessus de l'échelle MapLibre, en bas à gauche) */
-.prix-legende {
+/* Légendes des choroplèthes (prix, classes…), empilées en bas à gauche au-dessus de
+   l'échelle MapLibre. */
+.legendes {
   position: absolute; left: 10px; bottom: 34px; z-index: 10;
+  display: flex; flex-direction: column; gap: 6px; max-width: 230px;
+}
+.prix-legende {
   background: #fff; border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.25);
-  padding: 7px 10px; font-size: 11px; max-width: 220px;
+  padding: 7px 10px; font-size: 11px;
 }
 .prix-legende-titre { font-weight: 600; color: var(--brand-primary); margin-bottom: 4px; }
 .prix-legende-ligne { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
@@ -154,3 +163,45 @@ button:disabled { background: var(--border-neutral); cursor: not-allowed; }
 table.mini { border-collapse: collapse; width: 100%; margin: 4px 0; font-size: 11.5px; }
 table.mini th, table.mini td { border-bottom: 1px solid #eee; padding: 2px 4px; text-align: left; }
 table.mini td.num { text-align: right; }
+
+/* Filtre de période de la carte des prix (dans la légende) */
+.prix-periode { border-top: 1px solid #eee; margin-top: 5px; padding-top: 5px; }
+.prix-periode-ligne { display: flex; align-items: center; gap: 5px; padding: 2px 0; }
+.prix-periode-lib { width: 18px; color: var(--text-secondary); flex: none; }
+.prix-periode-ligne input[type="range"] { flex: 1; min-width: 60px; accent-color: var(--brand-primary); }
+.prix-periode-ligne input[type="date"] {
+  width: 108px; flex: none; padding: 1px 2px; font-size: 10.5px;
+  border: 1px solid var(--border-neutral); border-radius: 3px;
+}
+.prix-periode-reset {
+  background: #fff; color: var(--brand-primary); border: 1px solid var(--brand-primary);
+  font-size: 10.5px; padding: 2px 8px; margin-top: 3px;
+}
+
+/* Section « Fraîcheur des données » du panneau Couches */
+.fraicheur { padding: 3px 8px 5px; }
+
+/* Fermeture des panneaux : n'existe qu'en affichage mobile (tiroirs). */
+.panel-close { display: none; }
+
+/* --- Petits écrans : la carte occupe tout, les panneaux deviennent des tiroirs --- */
+@media (max-width: 900px) {
+  .panel {
+    position: fixed; top: 0; bottom: 0; z-index: 30;
+    width: min(88vw, 360px); max-width: 88vw;
+    box-shadow: 0 0 18px rgba(0, 0, 0, 0.35);
+  }
+  .panel-left { left: 0; resize: none; }
+  .panel-right { right: 0; }
+  .panel-close {
+    display: block; width: 100%; margin-bottom: 6px;
+    background: #fff; color: var(--brand-primary); border: 1px solid var(--brand-primary);
+  }
+  .panel-toggle { padding: 16px 5px; font-size: 12px; }
+  .toolbar { width: auto; left: 10px; right: 54px; max-width: 360px; }
+  /* Cibles tactiles + anti-zoom iOS (le focus d'un champ < 16px déclenche un zoom). */
+  .toolbar input[type="text"], .toolbar input[type="number"], .report-input { font-size: 16px; }
+  button { padding: 8px 12px; }
+  .legendes { max-width: 62vw; }
+  .rendu-legende { max-width: 55vw; }
+}

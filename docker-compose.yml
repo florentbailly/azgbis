@@ -21,6 +21,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    # Sans cette politique, la base ne revenait pas après un reboot du VPS : api/web/worker
+    # redémarraient seuls mais les thèmes lisant la base restaient en avertissement.
+    restart: unless-stopped
     # Décommenter pour exécuter le pipeline depuis l'hôte plutôt qu'en conteneur :
     # ports:
     #   - "5432:5432"

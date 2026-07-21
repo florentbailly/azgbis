@@ -25,6 +25,9 @@ def main() -> None:
     p_ctr.add_argument("--dept", required=True,
                        help="département dont importer les contours cadastraux (après `ingest dvf`)")
 
+    sub.add_parser("admin", help="contours administratifs France (communes + départements)")
+    sub.add_parser("radon", help="potentiel radon par commune (après `ingest admin`)")
+
     p_inpn = sub.add_parser("inpn")
     p_inpn.add_argument("--famille", required=True, help="znieff1 | znieff2 | natura2000 | espace_protege | patrimoine_geol")
     p_inpn.add_argument("--file", help="repli hors ligne : archive shapefile/GPKG locale (défaut : WFS PatriNat)")
@@ -64,6 +67,16 @@ def main() -> None:
         from . import contours
 
         contours.run(args.dept)
+
+    elif args.cmd == "admin":
+        from . import admin
+
+        admin.run()
+
+    elif args.cmd == "radon":
+        from . import radon
+
+        radon.run()
 
     elif args.cmd == "inpn":
         from . import inpn

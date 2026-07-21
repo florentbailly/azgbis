@@ -1,8 +1,9 @@
 # Qualification de zone — lot 1
 
 Outil interne de qualification d'une zone géographique (France) pour experts immobiliers :
-carte open data en navigation libre + analyse de zone + (à venir) rapport PDF de piste d'audit.
-Spécification : [docs/specification-lot1.md](docs/specification-lot1.md).
+carte open data en navigation libre + analyse de zone + rapport PDF de piste d'audit.
+Spécification : [docs/specification-lot1.md](docs/specification-lot1.md) ·
+enrichissements à venir : [docs/enrichissements-prevus.md](docs/enrichissements-prevus.md).
 
 ## Développement (Windows, sans conteneur pour le front/back)
 
@@ -84,6 +85,8 @@ podman compose up -d --build                              # postgis + api + web 
 podman compose --profile tools run --rm ingest schema     # créer les tables
 podman compose --profile tools run --rm ingest dvf --dept 69 --years 2021-2025
 podman compose --profile tools run --rm ingest contours --dept 69            # carte des prix au m²
+podman compose --profile tools run --rm ingest admin                         # contours communes/départements France
+podman compose --profile tools run --rm ingest radon                         # potentiel radon (après ingest admin)
 podman compose --profile tools run --rm ingest inpn --famille znieff1        # ~17 000 zonages
 podman compose --profile tools run --rm ingest inpn --famille znieff2
 podman compose --profile tools run --rm ingest inpn --famille natura2000     # SIC + ZPS

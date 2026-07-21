@@ -158,6 +158,8 @@ Puis, dans tmux (les commandes s'enchaînent seules grâce aux `&&`) :
 docker compose --profile tools run --rm ingest schema && \
 docker compose --profile tools run --rm ingest dvf --dept 69 --years 2021-2025 && \
 docker compose --profile tools run --rm ingest contours --dept 69 && \
+docker compose --profile tools run --rm ingest admin && \
+docker compose --profile tools run --rm ingest radon && \
 docker compose --profile tools run --rm ingest inpn --famille znieff1 && \
 docker compose --profile tools run --rm ingest inpn --famille znieff2 && \
 docker compose --profile tools run --rm ingest inpn --famille natura2000 && \

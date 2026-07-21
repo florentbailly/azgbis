@@ -3,16 +3,16 @@ import asyncio
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from . import catalog, config, db, tiles
+from . import catalog, config, db, dvf_export, tiles
 from .analysis import run_analysis
 from .clients import apicarto, http
 from .clients.http import SourceError
 from .reports import store as report_store
-from .schemas import AnalyzeRequest, AnalyzeResponse, ReportRequest
+from .schemas import AnalyzeRequest, AnalyzeResponse, ExportRequest, ReportRequest
 
 
 @asynccontextmanager
@@ -91,12 +91,54 @@ async def parcelle_lookup(lon: float = Query(...), lat: float = Query(...)) -> d
     return out
 
 
+@app.get("/api/sources")
+async def sources_fraicheur() -> dict:
+    """Fraîcheur des données importées : par code source, le millésime couvert (ou la
+    plage de millésimes, ex. DVF multi-années) et la date du dernier import."""
+    p = await db.pool()
+    if p is None:
+        return {"sources": [], "avertissements": [db.NO_DB_WARNING]}
+    rows = await p.fetch(
+        """SELECT code,
+                  (array_agg(libelle ORDER BY date_import DESC))[1] AS libelle,
+                  CASE WHEN min(millesime) = max(millesime) THEN max(millesime)
+                       ELSE min(millesime) || ' – ' || max(millesime) END AS millesime,
+                  max(date_import) AS date_import
+           FROM sources GROUP BY code ORDER BY code"""
+    )
+    return {
+        "sources": [
+            {
+                "code": r["code"],
+                "libelle": r["libelle"],
+                "millesime": r["millesime"],
+                "date_import": r["date_import"].isoformat(),
+            }
+            for r in rows
+        ],
+        "avertissements": [],
+    }
+
+
 @app.get("/api/dvf/transactions")
 async def dvf_transactions() -> dict:
     p = await db.pool()
     if p is None:
         return {"transactions": [], "avertissements": [db.NO_DB_WARNING]}
     raise HTTPException(501, "Filtres DVF : implémentation prévue après l'import du premier millésime (sprint 2).")
+
+
+@app.post("/api/dvf/export.xlsx")
+async def dvf_export_xlsx(req: ExportRequest) -> Response:
+    """Excel des transactions DVF de la zone de contexte (même périmètre que l'analyse)."""
+    contenu = await dvf_export.xlsx_transactions(req.zone)
+    if contenu is None:
+        raise HTTPException(503, db.NO_DB_WARNING)
+    return Response(
+        contenu,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="transactions-dvf.xlsx"'},
+    )
 
 
 # --- Rapports PDF (spec §8) : l'API dépose le job, le worker dédié le consomme. -----

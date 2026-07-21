@@ -15,8 +15,13 @@ export interface LayerDef {
   wms_layer?: string;
   /** Couche à lire dans les tuiles vectorielles (types vector et pmtiles). */
   source_layer?: string;
-  /** Rendu spécial : "prix_m2" = choroplèthe du prix médian au m² (couche DVF). */
-  rendu?: "prix_m2";
+  /** Rendu spécial : "prix_m2" = choroplèthe du prix médian au m² (couche DVF) ;
+   *  "classes" = choroplèthe catégorielle générique (légende portée par `classes`). */
+  rendu?: "prix_m2" | "classes";
+  /** Légende d'une couche `rendu: "classes"` : valeur, couleur et libellé de chaque classe. */
+  classes?: { classe: number; couleur: string; libelle: string }[];
+  /** Note de méthode affichée sous la légende (ex. maille selon le zoom). */
+  note_legende?: string;
   /** Opacité du raster (défaut 0.75). */
   opacite?: number;
   /** Accentue un WMS servi trop pâle (assombrit + sature, ex. EAIP). */

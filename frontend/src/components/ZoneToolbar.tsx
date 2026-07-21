@@ -15,6 +15,7 @@ interface Props {
 export default function ZoneToolbar({ draft, onDraftChange, onAnalyze, analyzing, canAnalyze, onFlyTo }: Props) {
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<BanSuggestion[]>([]);
+  const [repliee, setRepliee] = useState(false);
 
   const setMode = (mode: DrawMode) =>
     onDraftChange({ ...draft, mode, polygonPoints: [], polygonClosed: false, center: mode === "point" ? draft.center : null });
@@ -22,6 +23,17 @@ export default function ZoneToolbar({ draft, onDraftChange, onAnalyze, analyzing
   async function onSearch(q: string) {
     setQuery(q);
     setSuggestions(q.length >= 3 ? await searchAddress(q) : []);
+  }
+
+  // Barre repliée : un simple bouton pour dégager la carte (le tracé reste actif).
+  if (repliee) {
+    return (
+      <div className="toolbar toolbar-repliee">
+        <button className="secondary" onClick={() => setRepliee(false)} title="Déplier la sélection de zone">
+          Zone d'étude ▾
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -33,6 +45,9 @@ export default function ZoneToolbar({ draft, onDraftChange, onAnalyze, analyzing
           value={query}
           onChange={(e) => onSearch(e.target.value)}
         />
+        <button className="toolbar-plier" onClick={() => setRepliee(true)} title="Replier la sélection de zone">
+          ▴
+        </button>
       </div>
       {suggestions.length > 0 && (
         <div className="suggestions">
@@ -101,7 +116,9 @@ export default function ZoneToolbar({ draft, onDraftChange, onAnalyze, analyzing
         </button>
         {draft.mode === "select" && (
           <span className="muted">
-            Activez la couche « Parcelles cadastrales » puis cliquez sur une parcelle : sa fiche s'affiche dans le panneau Analyse.
+            {canAnalyze
+              ? "L'analyse portera sur la parcelle sélectionnée."
+              : "Activez la couche « Parcelles cadastrales » puis cliquez sur une parcelle : sa fiche s'affiche dans le panneau Analyse."}
           </span>
         )}
       </div>

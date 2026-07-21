@@ -44,6 +44,48 @@ export async function getReportStatus(jobId: string): Promise<ReportStatus> {
   return r.json();
 }
 
+/** Télécharge l'Excel des transactions DVF de la zone de contexte (section Marché). */
+export async function downloadTransactionsExcel(zone: ZoneInput): Promise<void> {
+  const r = await fetch("/api/dvf/export.xlsx", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ zone }),
+  });
+  if (!r.ok) throw new Error(`POST /api/dvf/export.xlsx → ${r.status}: ${await r.text()}`);
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "transactions-dvf.xlsx";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export interface DvfPeriode {
+  min: string | null;
+  max: string | null;
+}
+
+/** Bornes temporelles des ventes DVF importées (curseur de période de la carte des prix). */
+export async function fetchDvfPeriode(): Promise<DvfPeriode> {
+  const r = await fetch("/api/dvf/periode");
+  if (!r.ok) return { min: null, max: null };
+  return r.json();
+}
+
+export interface SourceFraicheur {
+  code: string;
+  libelle: string;
+  millesime: string | null;
+  date_import: string;
+}
+
+/** Millésimes et dates d'import des données chargées en base (panneau Couches). */
+export async function fetchSources(): Promise<SourceFraicheur[]> {
+  const r = await fetch("/api/sources");
+  if (!r.ok) return [];
+  return (await r.json()).sources ?? [];
+}
+
 export interface BanSuggestion {
   label: string;
   lon: number;

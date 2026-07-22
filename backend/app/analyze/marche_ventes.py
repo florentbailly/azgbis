@@ -59,5 +59,5 @@ async def analyze(zone: Zone, code_insee: str | None) -> ThemeResult:
     ]
     r.indicateurs["nb_transactions_zone_contexte"] = sum(row["nb"] for row in stats)
     r.items = [dict(row) | {"categorie": "transaction"} for row in recentes]
-    source(r, "dvf", "DVF géolocalisé (Etalab), enrichi BDNB/SIRENE", "https://files.data.gouv.fr/geo-dvf/")
+    source(r, "dvf", "DVF géolocalisé (Etalab), typologie enrichie BD TOPO/SIRENE", "https://files.data.gouv.fr/geo-dvf/")
     return r

@@ -107,6 +107,37 @@ CREATE TABLE IF NOT EXISTS carto_classes (
 CREATE INDEX IF NOT EXISTS carto_classes_geom_idx ON carto_classes USING gist (geom);
 CREATE INDEX IF NOT EXISTS carto_classes_couche_idx ON carto_classes (couche, niveau);
 
+-- Bâtiments BD TOPO (IGN) : support de l'enrichissement typologique des locaux DVF
+-- (spec §5 ; la BDNB n'est plus distribuée par département — constat 07/2026) et, à
+-- terme, d'une couche carte « typologie du bâti ». Import départemental remplaçant.
+CREATE TABLE IF NOT EXISTS bati (
+    id           bigserial PRIMARY KEY,
+    id_bdtopo    text UNIQUE, -- cleabs BD TOPO (stable entre millésimes)
+    dept         text NOT NULL,
+    usage_1      text,        -- Résidentiel | Commercial et services | Industriel | Agricole | …
+    usage_2      text,
+    nature       text,
+    nb_logements int,
+    legere       boolean,
+    source_id    int REFERENCES sources(id),
+    geom         geometry(MultiPolygon, 2154)
+);
+CREATE INDEX IF NOT EXISTS bati_geom_idx ON bati USING gist (geom);
+CREATE INDEX IF NOT EXISTS bati_dept_idx ON bati (dept);
+
+-- Établissements SIRENE actifs géolocalisés (INSEE) : arbitrage bureaux/commerce de
+-- l'enrichissement typologique via le code NAF. Import limité aux départements DVF.
+CREATE TABLE IF NOT EXISTS sirene_etablissements (
+    siret     text PRIMARY KEY,
+    dept      text NOT NULL,
+    naf       text,           -- activité principale (NAF rév. 2, ex. 47.11F)
+    enseigne  text,
+    source_id int REFERENCES sources(id),
+    geom      geometry(Point, 2154)
+);
+CREATE INDEX IF NOT EXISTS sirene_geom_idx ON sirene_etablissements USING gist (geom);
+CREATE INDEX IF NOT EXISTS sirene_dept_idx ON sirene_etablissements (dept);
+
 -- File des rapports PDF (spec §8) : l'API dépose, le worker consomme.
 -- Les PDF eux-mêmes vivent dans un volume temporaire purgé après 24 h, jamais en base.
 CREATE TABLE IF NOT EXISTS report_jobs (

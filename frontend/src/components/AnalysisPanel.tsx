@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createReport, downloadTransactionsExcel, getReportStatus } from "../api";
+import { TYPOLOGIE_LABELS } from "../typologies";
 import type { AnalyzeResponse, Catalog, ThemeResult, ZoneInput } from "../types";
 
 interface ParcelInfo {
@@ -81,6 +82,7 @@ function fmtVal(v: unknown): string {
   if (v === null || v === undefined || v === "") return "—";
   if (typeof v === "boolean") return v ? "Oui" : "Non";
   if (typeof v === "object") return JSON.stringify(v);
+  if (typeof v === "string" && v in TYPOLOGIE_LABELS) return TYPOLOGIE_LABELS[v];
   return String(v);
 }
 
@@ -205,7 +207,7 @@ function ThemeBlock({ result, color, libelle, extra }: { result: ThemeResult; co
             <tbody>
               {(ind.par_typologie as any[]).map((t, i) => (
                 <tr key={i}>
-                  <td>{t.typologie}</td>
+                  <td>{TYPOLOGIE_LABELS[t.typologie] ?? t.typologie}</td>
                   <td className="num">{t.nb_transactions}</td>
                   <td className="num">{t.prix_m2_median ? `${t.prix_m2_median.toLocaleString("fr-FR")} €` : "—"}</td>
                 </tr>

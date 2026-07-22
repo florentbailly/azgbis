@@ -4,23 +4,21 @@ Récapitulatif des imports et enrichissements restant à mener (état au 20/07/2
 par ordre de valeur métier. Tout reste 100 % open data, dans la continuité de la
 [spécification lot 1](specification-lot1.md) (§5 enrichissement, §9 pipeline).
 
-## 1. Typologie des bâtiments — distinction résidentiel / tertiaire / industriel / commerce / agricole / autre
+## 1. ✅ Typologie des bâtiments — FAIT (22/07/2026, via BD TOPO + SIRENE)
 
-C'est le chaînon manquant du thème Marché : aujourd'hui `dvf_locaux.typologie`
-retombe presque toujours sur `tertiaire_non_qualifie` (défaut du schéma), faute
-d'enrichissement. Commande prévue : `ingest enrich` (POC T-02 de la spec).
+Réalisé par `ingest bati` + `ingest sirene` + `ingest enrich` (spec §5 révisée).
+La BDNB prévue initialement n'est plus distribuée par département (export France
+~39 Go ou API à clé) : l'usage du bâti vient de la **BD TOPO (IGN)** et l'arbitrage
+bureaux/commerce du **code NAF SIRENE** (fichiers INSEE, l'ancien geo-sirene est
+décommissionné). Reste de l'ambition BDNB reportée sur l'item 4 :
 
-- **BDNB** (Base de données nationale des bâtiments, CSTB — licence ouverte) :
-  usage principal du bâtiment, année de construction, classe DPE. Jointure par
-  parcelle (`id_parcelle` DVF ↔ parcelles BDNB) puis par proximité de géométrie.
-- **SIRENE** (INSEE) : établissements actifs géolocalisés → confirme un usage
-  commerce/industrie/tertiaire à l'adresse et affine la catégorie (code NAF).
-- Règles de décision : BDNB prioritaire, SIRENE en confirmation, DVF
-  (`type_local_dvf`) en dernier recours ; `typologie_confiance` = forte/moyenne/faible
-  selon la concordance des sources (colonnes déjà en place dans le schéma).
-- **Retombées immédiates** : stats « par typologie » de l'analyse Marché enfin
-  significatives, colonne Typologie fiable dans l'export Excel, et à terme un
-  filtre par typologie sur la carte des prix.
+- année de construction et classe DPE → `ingest dpe` (ADEME) ;
+- à terme : couche carte « typologie du bâti » (la table `bati` contient déjà
+  l'usage et la géométrie de chaque bâtiment).
+
+Le filtre par typologie sur la carte des prix est fait (22/07/2026) : cases à
+cocher sous la couche dans le panneau Couches, paramètre `?typologies=` des
+tuiles `/api/tiles/dvf`, cumulable avec le filtre de période.
 
 ## 2. Transports en commun (OpenStreetMap)
 

@@ -4,3 +4,5 @@ geopandas>=1.0
 pyogrio>=0.10
 httpx>=0.27
 truststore>=0.10
+pyarrow>=17          # lecture en flux des parquet SIRENE (ingest sirene)
+py7zr>=0.22          # extraction des archives BD TOPO (ingest bati)

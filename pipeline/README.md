@@ -1,8 +1,9 @@
 # Pipeline batch — lot 1
 
-Alimente PostGIS avec les données non appelées en live : DVF, zonages INPN
-(puis BDNB, SIRENE, DPE — POC T-02 à venir). Sans ces imports, les thèmes
-« Environnement » et « Marché » de l'analyse affichent « source non chargée ».
+Alimente PostGIS avec les données non appelées en live : DVF, zonages INPN,
+contours administratifs, radon, bâtiments BD TOPO, établissements SIRENE (puis
+DPE). Sans ces imports, les thèmes « Environnement » et « Marché » de l'analyse
+affichent « source non chargée ».
 
 ## Prérequis : une base PostGIS
 
@@ -54,6 +55,18 @@ INPN (auto-téléchargé depuis le WFS PatriNat de la Géoplateforme) :
 .\.venv\Scripts\python -m ingest inpn --famille espace_protege  # parcs, réserves, APB, littoral…
 .\.venv\Scripts\python -m ingest inpn --famille patrimoine_geol
 ```
+Enrichissement typologique des locaux DVF (spec §5, après `dvf` + `contours`) :
+```powershell
+.\.venv\Scripts\python -m ingest bati --dept 69   # bâtiments BD TOPO des parcelles vendues (7z ~0,7 Go, purgé après)
+.\.venv\Scripts\python -m ingest sirene           # établissements actifs INSEE (parquet ~3 Go, tous dépts DVF)
+.\.venv\Scripts\python -m ingest enrich           # croisement parcellaire → typologie (relançable)
+```
+`ingest enrich` affiche le taux de locaux d'activité restant « tertiaire_non_qualifie »
+(objectif spec : < 15 %). À relancer après tout import `dvf`, `bati` ou `sirene`.
+Sobriété disque : `bati` ne garde que les bâtiments intersectant une parcelle vendue
+(~45 000 pour le Rhône au lieu de 910 000) et supprime archive et gpkg après import —
+le relancer si un `contours` ultérieur ajoute des parcelles.
+
 Les cinq familles sont nationales : un import suffit pour tout le territoire. Chaque import
 calcule aussi les colonnes d'affichage `geom_gen` (contour généralisé à 50 m) et `surface_m2`,
 utilisées par les tuiles carte — l'analyse, elle, lit toujours `geom` en pleine résolution.
@@ -75,9 +88,7 @@ Les thèmes Environnement et Marché de « Analyser la zone » utilisent alors l
 
 ## Reste à faire (ordre spec §9)
 
-- `ingest enrich` : POC T-02 — appariement BDNB + SIRENE pour la typologie tertiaire
-  (l'import DVF pose déjà les colonnes typologie/source/confiance ; niveau « dvf » seul).
-- `ingest dpe`, `ingest bdnb`, `ingest sirene`.
+- `ingest dpe` (ADEME) : classes DPE et année de construction à l'adresse.
 - `ingest tiles` : génération PMTiles (tippecanoe), désormais réservée à d'éventuels
   **gros volumes figés** (fond cadastral complet, par exemple). Les zonages INPN
   (`/api/tiles/env/...`) comme la carte des prix DVF (`/api/tiles/dvf/...`) sont servis

@@ -6,9 +6,12 @@ d'etalab-cadastre (Licence Ouverte), dont les identifiants sont ceux du DVF
 géolocalisé : `id_parcelle` (14 car. = commune+préfixe+section+numéro) se joint
 directement, et ses 10 premiers caractères donnent l'id de section.
 
-Seules les parcelles portant au moins une vente avec prix sont conservées
-(~25 000 pour le Rhône, contre ~500 000 parcelles au total) : les fichiers
-parcellaires se téléchargent donc commune par commune, jamais en bloc.
+Seules les parcelles portant au moins un local vendu sont conservées (quelques
+dizaines de milliers pour le Rhône, contre ~500 000 parcelles au total) : les
+fichiers parcellaires se téléchargent donc commune par commune, jamais en bloc.
+Les parcelles sans prix/m² servent à l'enrichissement typologique (`ingest
+enrich`, jointure locaux → parcelle → bâti/SIRENE) ; la carte des prix ne colore
+que celles présentes dans dvf_prix.
 """
 import gzip
 import json
@@ -50,7 +53,7 @@ def run(dept: str) -> None:
         communes = [r[0] for r in cur.fetchall()]
         cur.execute(
             "SELECT DISTINCT id_parcelle FROM dvf_locaux "
-            "WHERE prix_m2 IS NOT NULL AND id_parcelle LIKE %s",
+            "WHERE id_parcelle IS NOT NULL AND id_parcelle LIKE %s",
             (dept + "%",),
         )
         parcelles_vendues = {r[0] for r in cur.fetchall()}

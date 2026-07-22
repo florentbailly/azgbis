@@ -4,6 +4,7 @@ import AnalysisPanel, { type ParcelInfo } from "./components/AnalysisPanel";
 import LayerPanel from "./components/LayerPanel";
 import MapView from "./components/MapView";
 import ZoneToolbar from "./components/ZoneToolbar";
+import { TYPOLOGIE_ORDRE } from "./typologies";
 import type { AnalyzeResponse, Catalog, ZoneInput } from "./types";
 import { initialDraft, loadDraft, parcelleToZone, saveDraft, toFeatures, toZoneInput, zoneInputToDraft, type ZoneDraft } from "./zone";
 
@@ -32,6 +33,8 @@ export default function App() {
   const [activeLayerIds, setActiveLayerIds] = useState<Set<string>>(
     () => new Set(MODE_RENDU?.couches ?? []),
   );
+  // Filtre typologique de la carte des prix (toutes cochées = tuiles précalculées).
+  const [typologiesPrix, setTypologiesPrix] = useState<string[]>([...TYPOLOGIE_ORDRE]);
   const [draft, setDraft] = useState<ZoneDraft>(() => {
     if (MODE_RENDU) return MODE_RENDU.zone ? zoneInputToDraft(MODE_RENDU.zone) : initialDraft;
     return loadDraft() ?? initialDraft;
@@ -131,6 +134,7 @@ export default function App() {
           catalog={catalog}
           activeLayerIds={activeLayerIds}
           sources={sources}
+          typologiesPrix={typologiesPrix}
           onClose={() => setLeftOpen(false)}
           onToggle={(id) =>
             setActiveLayerIds((prev) => {
@@ -138,6 +142,13 @@ export default function App() {
               next.has(id) ? next.delete(id) : next.add(id);
               return next;
             })
+          }
+          onToggleTypologie={(code) =>
+            setTypologiesPrix((prev) =>
+              prev.includes(code)
+                ? prev.length > 1 ? prev.filter((c) => c !== code) : prev // jamais zéro
+                : [...prev, code],
+            )
           }
         />
       )}
@@ -159,6 +170,7 @@ export default function App() {
         <MapView
           catalog={catalog}
           activeLayerIds={activeLayerIds}
+          typologiesPrix={typologiesPrix}
           zoneFeatures={zoneFeatures}
           onMapClick={onMapClick}
           flyTo={flyTo}

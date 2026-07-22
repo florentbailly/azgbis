@@ -177,17 +177,24 @@ Barre adresse/commune via la Base Adresse Nationale (`https://api-adresse.data.g
 
 **Problème** : DVF `type_local` ∈ {Maison, Appartement, Dépendance, Local industriel et commercial ou assimilé} — insuffisant pour distinguer bureaux / commerce / industriel / agricole.
 
-**Chaîne d'enrichissement** (à l'import, ordre de priorité décroissante) :
+> **Révision du 22/07/2026 — BDNB remplacée par la BD TOPO.** La BDNB n'est plus
+> distribuée par département (export France ~39 Go ou API à clé uniquement) ; l'usage
+> du bâti provient désormais de la **BD TOPO (IGN)**, départementale, trimestrielle et
+> sous Licence Ouverte. L'année de construction et le DPE, que la BDNB aurait apportés,
+> viendront de `ingest dpe` (ADEME). Le géo-sirene historique étant décommissionné
+> (avril 2026), SIRENE est lu depuis les fichiers INSEE (StockEtablissement +
+> géolocalisation, parquet).
 
-1. **Résidentiel** : `type_local` Maison/Appartement → `residentiel` (confiance `haute`).
-2. **BDNB** : jointure transaction → parcelle(s) → bâtiment(s) BDNB → `usage principal` (bureaux, commerce, industrie, agricole, enseignement, santé…) → mappé sur notre nomenclature (confiance `haute` si un seul bâtiment/usage sur la parcelle, `moyenne` si usages mixtes).
-3. **SIRENE** : établissements actifs géolocalisés à l'adresse/parcelle au moment de la mutation ; code NAF dominant → typologie (confiance `moyenne`).
-4. **Heuristiques DVF** : nature de culture des parcelles (agricole), surface et libellés (confiance `basse`).
-5. Sinon : `tertiaire_non_qualifie` (confiance `nulle`), toujours affiché comme tel — jamais reclassé arbitrairement.
+**Chaîne d'enrichissement** (commande `ingest enrich`, relançable après tout import, ordre de priorité décroissante) :
+
+1. **Résidentiel** : `type_local` Maison/Appartement → `residentiel` (confiance `haute`, posée par `ingest dvf`).
+2. **BD TOPO** : jointure transaction → parcelle → bâtiment(s) intersectants → `usage_1` dominant pondéré par la surface d'intersection. `Industriel`/`Agricole` concluent directement (confiance `haute` si usage unique sur la parcelle, `moyenne` si usages mixtes). Sobriété : `ingest bati` ne conserve que les bâtiments intersectant une parcelle vendue (~1/20 du volume — le VPS vise 40 Go tout compris) et purge archives et extraits après import.
+3. **SIRENE** : établissements actifs géolocalisés sur la parcelle (tolérance 10 m) ; le code NAF dominant arbitre `bureaux`/`commerce`/`industriel`/`agricole`/`autre` (confiance `moyenne` si ≥ 60 % des établissements concordent, `basse` sinon) — c'est lui qui départage l'usage BD TOPO « Commercial et services », muet sur la distinction bureaux/commerce.
+4. Sinon : `tertiaire_non_qualifie` (confiance `nulle`), toujours affiché comme tel — jamais reclassé arbitrairement.
 
 **Nomenclature cible** : `residentiel`, `bureaux`, `commerce`, `industriel`, `agricole`, `autre`, `tertiaire_non_qualifie`.
 
-Chaque transaction porte `typologie`, `typologie_source` (dvf/bdnb/sirene/heuristique) et `typologie_confiance` — les trois colonnes figurent dans l'export Excel et la méthodologie est rappelée dans la page de traçabilité du rapport. Objectif de qualité mesuré à l'import : < 15 % de `tertiaire_non_qualifie` sur les locaux non résidentiels (indicateur suivi à chaque millésime).
+Chaque transaction porte `typologie`, `typologie_source` (dvf/bdtopo/sirene) et `typologie_confiance` — les trois colonnes figurent dans l'export Excel et la méthodologie est rappelée dans la page de traçabilité du rapport. Objectif de qualité mesuré à l'import (affiché par `ingest enrich`) : < 15 % de `tertiaire_non_qualifie` sur les locaux non résidentiels (indicateur suivi à chaque millésime).
 
 ---
 
@@ -208,12 +215,13 @@ dvf_locaux(id PK, id_mutation FK, type_local_dvf, surface_reelle_bati, surface_t
 dpe(id PK, numero_dpe, classe_conso, classe_ges, date_etablissement, surface,
     annee_construction, id_batiment_bdnb, adresse_ban_id, geom Point)
 
--- Bâti
-bdnb_batiments(id_batiment PK, usage_principal, annee_construction, surface_plancher_est,
-               ids_parcelles text[], geom MultiPolygon)
+-- Bâti (BD TOPO IGN — révision du 22/07/2026, voir §5 ; import départemental,
+-- restreint aux bâtiments des parcelles vendues — sobriété disque)
+bati(id PK, id_bdtopo UNIQUE /* cleabs */, dept, usage_1, usage_2, nature,
+     nb_logements, legere, geom MultiPolygon)
 
--- Occupants (support d'enrichissement en lot 1)
-sirene_etablissements(siret PK, denomination, naf, date_debut, etat, adresse_ban_id, geom Point)
+-- Occupants (support d'enrichissement en lot 1 ; établissements actifs seulement)
+sirene_etablissements(siret PK, dept, naf, enseigne, geom Point)
 
 -- Environnement (une table par famille, schéma commun)
 env_zonages(id PK, famille /* natura2000|znieff1|znieff2|espace_protege|patrimoine_geol */,
@@ -223,7 +231,8 @@ env_zonages(id PK, famille /* natura2000|znieff1|znieff2|espace_protege|patrimoi
 
 -- Carte des prix (affichage uniquement ; l'analyse recalcule toujours sur dvf_locaux)
 contours(id PK, niveau /* parcelle|section|commune|departement */, code, libelle,
-         geom MultiPolygon /* cadastre Etalab ; parcelles limitées à celles vendues */)
+         geom MultiPolygon /* cadastre Etalab ; parcelles limitées à celles portant
+         au moins un local vendu (support carte des prix ET enrichissement §5) */)
 dvf_prix(id PK, niveau, code, libelle, nb_ventes,
          prix_m2_median /* même définition que le thème Marché */, geom MultiPolygon)
 
@@ -250,6 +259,8 @@ Tuiles vectorielles (MVT) des zonages INPN, servies depuis PostGIS (§3). `famil
 
 ### `GET /tiles/dvf/{z}/{x}/{y}.pbf`
 Tuiles vectorielles de la carte des prix : couche MVT `prix`, attributs `niveau`, `code`, `libelle`, `nb_ventes`, `prix_m2` (médiane, même définition que le thème Marché). Le niveau d'agrégation dépend du zoom demandé : `departement` (z ≤ 8), `commune` (9-11), `section` (12-13), `parcelle` (≥ 14). Les mailles sont précalculées dans `dvf_prix` par `ingest contours` et rafraîchies par chaque `ingest dvf`. Tuile sans vente → `204`.
+
+Filtres optionnels `?debut=AAAA-MM-JJ&fin=AAAA-MM-JJ` (période de mutation) et `?typologies=bureaux,commerce` (codes §5, `400` si code inconnu) : les médianes sont alors recalculées à la volée sur `dvf_locaux` avec les mêmes jointures que le précalcul. Sans filtre (ou toutes typologies cochées), le précalcul est servi.
 
 Paramètres optionnels `?debut=AAAA-MM-JJ&fin=AAAA-MM-JJ` (filtre de période du front) : les médianes sont alors recalculées à la volée sur les seules mutations de la période, avec les mêmes jointures que le précalcul, restreintes aux contours de la tuile. `fin < debut` → `400`.
 
@@ -314,14 +325,14 @@ Chemin type : téléchargement (stockage brut daté sur disque) → contrôles (
 |---|---|---|
 | DVF géolocalisé | semestrielle | publications Etalab (avril, octobre) |
 | DPE ADEME | trimestrielle | cron |
-| BDNB | semestrielle | suivi manuel des releases CSTB |
-| SIRENE géolocalisé | mensuelle | cron |
+| Bâtiments BD TOPO IGN (usage du bâti, ex-BDNB — §5) | trimestrielle | cron (`ingest bati --dept …`, millésimes IGN mars/juin/sept./déc.) |
+| SIRENE INSEE (StockEtablissement + géolocalisation) | mensuelle | cron (`ingest sirene`) |
 | INPN (5 familles) | semestrielle | cron (`ingest inpn --famille …`, WFS PatriNat) |
 | Contours cadastre Etalab (carte des prix) | trimestrielle | cron (`ingest contours --dept …`) |
 | Contours administratifs Etalab (choroplèthes par classes) | annuelle | cron (`ingest admin`, millésime COG) |
 | Potentiel radon IRSN | annuelle | cron (`ingest radon`, donnée quasi statique — arrêté de 2018) |
 
-L'enrichissement typologique (§5) est un job dépendant, relancé après tout import DVF, BDNB ou SIRENE.
+L'enrichissement typologique (§5) est un job dépendant (`ingest enrich`), relancé après tout import DVF, BD TOPO ou SIRENE.
 
 ---
 

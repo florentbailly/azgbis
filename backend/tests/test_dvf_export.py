@@ -12,7 +12,7 @@ ZONE_RESUME = {"surface_zone_contexte_m2": 123456}
 def _ligne(i: int) -> tuple:
     return (
         datetime.date(2025, 1, 1), "Vente", 250000 + i, "69123", f"69123000AB{i:04d}",
-        "Appartement", "residentiel", "haute", 60, None, 3, 4200, "D", f"2025-{i}",
+        "Appartement", "residentiel", "dvf", "haute", 60, None, 3, 4200, "D", f"2025-{i}",
     )
 
 
@@ -27,6 +27,12 @@ def test_classeur_structure():
     assert ws.max_row == 6  # entête + 5 lignes
     assert ws.freeze_panes == "A2"
     assert ws.auto_filter.ref is not None
+
+
+def test_typologie_en_libelle_metier():
+    wb = _relire(dvf_export._construire([_ligne(1)], ZONE_RESUME))
+    ligne = [c.value for c in wb["Transactions DVF"][2]]
+    assert ligne[dvf_export.COL_TYPOLOGIE] == "Résidentiel"
 
 
 def test_feuille_a_propos_sans_troncature():

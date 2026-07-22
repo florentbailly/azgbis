@@ -46,6 +46,18 @@ CATEGORY_LABELS: dict[str, str] = {
     "patrimoine_geol": "Patrimoine géol.",
 }
 
+# Nomenclature typologique des locaux DVF (spec §5). Miroir obligatoire :
+# TYPOLOGIE_LABELS d'AnalysisPanel.tsx — et libellés repris par l'export Excel.
+TYPOLOGIES: dict[str, str] = {
+    "residentiel": "Résidentiel",
+    "bureaux": "Bureaux",
+    "commerce": "Commerce",
+    "industriel": "Industriel",
+    "agricole": "Agricole",
+    "autre": "Autre (dépendances…)",
+    "tertiaire_non_qualifie": "Tertiaire non qualifié",
+}
+
 # Champs servant de titre à un élément détaillé, par ordre de préférence
 # (mêmes règles que le front).
 TITLE_FIELDS = [
@@ -68,6 +80,8 @@ NOTES_METHODO: dict[str, str] = {
                  "l'Urbanisme (API Carto). Une commune au RNU ou non couverte est signalée.",
     "marche_ventes": "Transactions DVF géolocalisées (Etalab) dans la zone de contexte. Prix/m² "
                      "calculé uniquement pour les mutations mono-local bâti ; médiane par "
-                     "typologie. Typologie : niveau « dvf » (enrichissement BDNB/SIRENE à venir, "
-                     "les locaux d'activité restent « tertiaire_non_qualifie »).",
+                     "typologie. Typologie des locaux d'activité enrichie par croisement "
+                     "parcellaire : usage des bâtiments BD TOPO (IGN), puis code NAF des "
+                     "établissements SIRENE actifs (INSEE) pour distinguer bureaux et commerce ; "
+                     "sans signal probant, le local reste « Tertiaire non qualifié ».",
 }

@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/zone.ts","./src/components/analysispanel.tsx","./src/components/layerpanel.tsx","./src/components/mapview.tsx","./src/components/zonetoolbar.tsx"],"version":"5.6.3"}
+{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/typologies.ts","./src/zone.ts","./src/components/analysispanel.tsx","./src/components/layerpanel.tsx","./src/components/mapview.tsx","./src/components/zonetoolbar.tsx"],"version":"5.6.3"}

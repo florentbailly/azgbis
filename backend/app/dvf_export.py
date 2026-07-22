@@ -10,15 +10,16 @@ import json
 
 from . import db
 from .geo import resolve_zone
+from .reports.libelles import TYPOLOGIES
 from .schemas import ZoneInput
 
 PLAFOND_LIGNES = 10_000  # garde-fou : une zone très large ne doit pas figer l'API
 
 SQL = f"""
 SELECT m.date_mutation, m.nature_mutation, m.valeur_fonciere, m.code_commune,
-       l.id_parcelle, l.type_local_dvf, l.typologie, l.typologie_confiance,
-       l.surface_reelle_bati, l.surface_terrain, l.nb_pieces, l.prix_m2,
-       l.dpe_classe, m.id_mutation
+       l.id_parcelle, l.type_local_dvf, l.typologie, l.typologie_source,
+       l.typologie_confiance, l.surface_reelle_bati, l.surface_terrain,
+       l.nb_pieces, l.prix_m2, l.dpe_classe, m.id_mutation
 FROM dvf_locaux l
 JOIN dvf_mutations m ON m.id_mutation = l.id_mutation
 WHERE ST_Intersects(m.geom, ST_Transform(ST_GeomFromGeoJSON($1), 2154))
@@ -28,10 +29,11 @@ LIMIT {PLAFOND_LIGNES}
 
 ENTETES = [
     "Date mutation", "Nature", "Valeur foncière (€)", "Commune (INSEE)",
-    "Parcelle", "Type de local (DVF)", "Typologie", "Confiance typologie",
-    "Surface bâtie (m²)", "Surface terrain (m²)", "Pièces", "Prix (€/m²)",
-    "DPE", "Id mutation",
+    "Parcelle", "Type de local (DVF)", "Typologie", "Source typologie",
+    "Confiance typologie", "Surface bâtie (m²)", "Surface terrain (m²)",
+    "Pièces", "Prix (€/m²)", "DPE", "Id mutation",
 ]
+COL_TYPOLOGIE = 6  # index 0-based dans SQL/ENTETES — libellé métier substitué à l'écriture
 
 
 async def xlsx_transactions(zone_input: ZoneInput) -> bytes | None:
@@ -58,13 +60,15 @@ def _construire(rows: list[tuple], zone_resume: dict) -> bytes:
         cell.font = Font(bold=True)
     ws.freeze_panes = "A2"
     for row in rows:
-        ws.append(list(row))
+        valeurs = list(row)
+        valeurs[COL_TYPOLOGIE] = TYPOLOGIES.get(valeurs[COL_TYPOLOGIE], valeurs[COL_TYPOLOGIE])
+        ws.append(valeurs)
     # Formats lisibles sans y passer : montants séparés par milliers, dates ISO courtes.
-    for col, fmt in ((1, "yyyy-mm-dd"), (3, "# ##0"), (12, "# ##0")):
+    for col, fmt in ((1, "yyyy-mm-dd"), (3, "# ##0"), (13, "# ##0")):
         lettre = get_column_letter(col)
         for cell in ws[lettre][1:]:
             cell.number_format = fmt
-    largeurs = [12, 10, 16, 10, 16, 18, 22, 10, 14, 15, 8, 11, 6, 24]
+    largeurs = [12, 10, 16, 10, 16, 18, 22, 10, 10, 14, 15, 8, 11, 6, 24]
     for i, largeur in enumerate(largeurs, start=1):
         ws.column_dimensions[get_column_letter(i)].width = largeur
     ws.auto_filter.ref = ws.dimensions

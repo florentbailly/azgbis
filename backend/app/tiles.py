@@ -110,11 +110,12 @@ WHERE q.geom IS NOT NULL
 """
 
 
-# Variante filtrée par période de mutation (`?debut=…&fin=…`) : dvf_prix agrège toute
-# la base, il faut donc recalculer les médianes à la volée sur les ventes de la période.
-# Mêmes jointures que le précalcul (ingest contours), mais restreintes aux contours
-# intersectant la tuile — les index (GIST sur contours, id_parcelle/date sur DVF)
-# gardent la latence sous celle d'un aller-retour réseau, sauf tuiles départementales.
+# Variante filtrée par période de mutation (`?debut=…&fin=…`) et/ou typologies
+# (`?typologies=bureaux,commerce`) : dvf_prix agrège toute la base, il faut donc
+# recalculer les médianes à la volée sur les ventes retenues. Mêmes jointures que le
+# précalcul (ingest contours), mais restreintes aux contours intersectant la tuile —
+# les index (GIST sur contours, id_parcelle/date sur DVF) gardent la latence sous
+# celle d'un aller-retour réseau, sauf tuiles départementales.
 _JOINTURES_PERIODE = {
     "parcelle": """JOIN dvf_locaux l ON l.id_parcelle = c.code
                    JOIN dvf_mutations m ON m.id_mutation = l.id_mutation""",
@@ -145,6 +146,7 @@ agg AS (
     WHERE c.niveau = $4 AND c.geom && b.g2154
       AND l.prix_m2 IS NOT NULL
       AND m.date_mutation BETWEEN $5 AND $6
+      AND ($7::text[] IS NULL OR l.typologie = ANY($7::text[]))
     GROUP BY c.id
 )
 SELECT ST_AsMVT(q, '{MVT_PRIX_LAYER}', 4096, 'geom') FROM (
@@ -161,21 +163,37 @@ WHERE q.geom IS NOT NULL
 }
 
 
+# Nomenclature typologique filtrable (spec §5) — mêmes codes que dvf_locaux.typologie.
+TYPOLOGIES_PRIX = ("residentiel", "bureaux", "commerce", "industriel", "agricole",
+                   "autre", "tertiaire_non_qualifie")
+
+
 @router.get("/api/tiles/dvf/{z}/{x}/{y}.pbf")
 async def dvf_tile(
     z: int, x: int, y: int,
     debut: datetime.date | None = Query(None),
     fin: datetime.date | None = Query(None),
+    typologies: str | None = Query(None, description="codes séparés par des virgules"),
 ) -> Response:
     _check_zxy(z, x, y)
+    typos: list[str] | None = None
+    if typologies:
+        typos = typologies.split(",")
+        inconnues = set(typos) - set(TYPOLOGIES_PRIX)
+        if inconnues:
+            raise HTTPException(400, f"Typologie(s) inconnue(s) : {', '.join(sorted(inconnues))}")
+        if set(typos) == set(TYPOLOGIES_PRIX):
+            typos = None  # toutes cochées = pas de filtre : garder le précalcul
     p = await db.pool()
     if p is None:
         raise HTTPException(503, db.NO_DB_WARNING)
     niveau = _niveau(z)
-    if debut is not None and fin is not None:
+    if (debut is not None and fin is not None) or typos is not None:
+        debut = debut or datetime.date(1900, 1, 1)
+        fin = fin or datetime.date(2100, 1, 1)
         if fin < debut:
             raise HTTPException(400, "Période invalide : fin antérieure au début.")
-        mvt = await p.fetchval(SQL_PRIX_PERIODE[niveau], z, x, y, niveau, debut, fin)
+        mvt = await p.fetchval(SQL_PRIX_PERIODE[niveau], z, x, y, niveau, debut, fin, typos)
     else:
         mvt = await p.fetchval(SQL_PRIX, z, x, y, niveau)
     return _mvt_response(mvt)

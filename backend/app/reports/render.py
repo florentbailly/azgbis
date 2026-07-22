@@ -46,6 +46,8 @@ def _fmt(v: Any) -> str:
 
 _env.filters["fr_nombre"] = _fr_nombre
 _env.filters["fmt"] = _fmt
+# Codes typologie (spec §5) → libellés métier, partagés avec l'écran et l'Excel.
+_env.filters["typologie"] = lambda v: libelles.TYPOLOGIES.get(str(v), _fmt(v))
 
 
 def _theme_meta(theme_id: str) -> dict:

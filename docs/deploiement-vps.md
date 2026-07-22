@@ -160,6 +160,9 @@ docker compose --profile tools run --rm ingest dvf --dept 69 --years 2021-2025 &
 docker compose --profile tools run --rm ingest contours --dept 69 && \
 docker compose --profile tools run --rm ingest admin && \
 docker compose --profile tools run --rm ingest radon && \
+docker compose --profile tools run --rm ingest bati --dept 69 && \
+docker compose --profile tools run --rm ingest sirene && \
+docker compose --profile tools run --rm ingest enrich && \
 docker compose --profile tools run --rm ingest inpn --famille znieff1 && \
 docker compose --profile tools run --rm ingest inpn --famille znieff2 && \
 docker compose --profile tools run --rm ingest inpn --famille natura2000 && \
@@ -169,8 +172,35 @@ docker compose --profile tools run --rm ingest status
 ```
 
 Se détacher de tmux : `Ctrl+B` puis `D` (la session continue) ; y revenir :
-`tmux attach -t imports`. Ajouter d'autres départements DVF = rejouer `ingest dvf`
-puis `ingest contours` avec le bon `--dept`.
+`tmux attach -t imports`. Ajouter d'autres départements = rejouer `ingest dvf`,
+`ingest contours` puis `ingest bati` avec le bon `--dept` (dans cet ordre — bati ne
+garde que les bâtiments des parcelles vendues), et refaire `ingest enrich`.
+
+### France métropolitaine sur un VPS de 40 Go
+
+Le pipeline est dimensionné pour tenir tout compris dans ~40 Go : DVF national
+≈ 9 Go, bâtiments filtrés ≈ 2 Go, SIRENE ≈ 1 Go, zonages/choroplèthes ≈ 0,5 Go,
+plus images Docker et système. Boucle type (24-48 h, dans tmux) :
+
+```bash
+DEPTS="$(seq -w 1 19) 2A 2B $(seq 21 95)"
+for d in $DEPTS; do
+  docker compose --profile tools run --rm ingest dvf --dept $d --years 2021-2025 && \
+  docker compose --profile tools run --rm ingest contours --dept $d && \
+  docker compose --profile tools run --rm ingest bati --dept $d || echo "$d" >> ~/imports-echecs.log
+done
+# SIRENE par lots de ~20 départements (4 Go de RAM : ne pas tout charger d'un coup)
+for lot in "$(seq -w 1 19) 2A 2B" "$(seq 21 40)" "$(seq 41 60)" "$(seq 61 80)" "$(seq 81 95)"; do
+  args=""; for d in $lot; do args="$args --dept $d"; done
+  docker compose --profile tools run --rm ingest sirene $args
+done
+docker compose --profile tools run --rm ingest enrich
+cat ~/imports-echecs.log 2>/dev/null && echo "→ relancer ces départements"
+```
+
+Si le disque se tend, le volume raw peut être purgé sans risque (tout est
+retéléchargeable ; les fichiers cadastre/DVF servent de cache d'import) :
+`docker run --rm -v azgbis_raw:/r alpine sh -c 'rm -rf /r/*'`.
 
 ## 9. Recette
 
@@ -198,8 +228,12 @@ puis `ingest contours` avec le bon `--dept`.
   docker compose exec postgis pg_dump -U azgbis -Fc azgbis > ~/azgbis-$(date +%F).dump
   ```
 - **Rafraîchir le DVF** (publications avril/octobre) : rejouer `ingest dvf` puis
-  `ingest contours` par département.
+  `ingest contours` par département, puis `ingest enrich`.
+- **Rafraîchir la typologie** : `ingest bati --dept …` à chaque millésime BD TOPO
+  (mars/juin/septembre/décembre), `ingest sirene` mensuel, puis `ingest enrich`.
 - Les rapports PDF sont purgés automatiquement après 24 h ; rien à faire.
+- Après un `git pull` qui touche `pipeline/` : `docker compose --profile tools build ingest`
+  avant les imports — `up --build` ignore les services derrière un profil.
 
 ## En cas de problème
 

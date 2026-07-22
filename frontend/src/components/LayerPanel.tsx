@@ -1,11 +1,14 @@
 import type { SourceFraicheur } from "../api";
+import { TYPOLOGIE_LABELS, TYPOLOGIE_ORDRE } from "../typologies";
 import type { Catalog } from "../types";
 
 interface Props {
   catalog: Catalog | null;
   activeLayerIds: Set<string>;
   sources: SourceFraicheur[];
+  typologiesPrix: string[];
   onToggle: (layerId: string) => void;
+  onToggleTypologie: (code: string) => void;
   onClose: () => void;
 }
 
@@ -16,13 +19,15 @@ const SOURCE_LABELS: Record<string, string> = {
   cadastre: "Contours cadastraux (Etalab)",
   admin: "Contours administratifs (Etalab)",
   radon: "Potentiel radon (IRSN)",
+  bdtopo: "Bâtiments BD TOPO (IGN)",
+  sirene: "Établissements SIRENE (INSEE)",
 };
 
 function frDateHeure(iso: string): string {
   return new Date(iso).toLocaleDateString("fr-FR");
 }
 
-export default function LayerPanel({ catalog, activeLayerIds, sources, onToggle, onClose }: Props) {
+export default function LayerPanel({ catalog, activeLayerIds, sources, typologiesPrix, onToggle, onToggleTypologie, onClose }: Props) {
   if (!catalog) return <div className="panel panel-left">Chargement du catalogue…</div>;
   return (
     <div className="panel panel-left" title="Bord droit étirable pour redimensionner">
@@ -38,16 +43,37 @@ export default function LayerPanel({ catalog, activeLayerIds, sources, onToggle,
               {theme.libelle}
             </summary>
             {layers.map((l) => (
-              <div key={l.id} className="layer-row">
-                <input
-                  type="checkbox"
-                  id={`layer-${l.id}`}
-                  checked={activeLayerIds.has(l.id)}
-                  onChange={() => onToggle(l.id)}
-                />
-                <label htmlFor={`layer-${l.id}`}>{l.libelle}</label>
-                {!l.flux_confirme && <span className="badge-unconfirmed" title="URL/nom du flux à confirmer (T-01)">flux à confirmer</span>}
-                {l.mode === "batch" && <span className="badge-unconfirmed" title="Servie par le pipeline batch">batch</span>}
+              <div key={l.id}>
+                <div className="layer-row">
+                  <input
+                    type="checkbox"
+                    id={`layer-${l.id}`}
+                    checked={activeLayerIds.has(l.id)}
+                    onChange={() => onToggle(l.id)}
+                  />
+                  <label htmlFor={`layer-${l.id}`}>{l.libelle}</label>
+                  {!l.flux_confirme && <span className="badge-unconfirmed" title="URL/nom du flux à confirmer (T-01)">flux à confirmer</span>}
+                  {l.mode === "batch" && <span className="badge-unconfirmed" title="Servie par le pipeline batch">batch</span>}
+                </div>
+                {/* Filtre typologique de la carte des prix (spec §5) : recalcul des
+                    médianes à la volée côté tuiles dès qu'une case est décochée. */}
+                {l.rendu === "prix_m2" && activeLayerIds.has(l.id) && (
+                  <div className="typo-filtre">
+                    <div className="typo-filtre-titre">Typologies affichées</div>
+                    {TYPOLOGIE_ORDRE.map((code) => (
+                      <div key={code} className="layer-row typo-filtre-ligne">
+                        <input
+                          type="checkbox"
+                          id={`typo-${code}`}
+                          checked={typologiesPrix.includes(code)}
+                          disabled={typologiesPrix.length === 1 && typologiesPrix.includes(code)}
+                          onChange={() => onToggleTypologie(code)}
+                        />
+                        <label htmlFor={`typo-${code}`}>{TYPOLOGIE_LABELS[code]}</label>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </details>

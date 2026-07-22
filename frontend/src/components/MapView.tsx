@@ -3,6 +3,7 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Protocol } from "pmtiles";
 import { fetchDvfPeriode } from "../api";
+import { TYPOLOGIE_LABELS, TYPOLOGIE_ORDRE } from "../typologies";
 import type { Catalog, LayerDef } from "../types";
 
 maplibregl.addProtocol("pmtiles", new Protocol().tile);
@@ -78,6 +79,8 @@ function wmsTileUrl(l: LayerDef): string {
 interface Props {
   catalog: Catalog | null;
   activeLayerIds: Set<string>;
+  /** Typologies affichées sur la carte des prix (panneau Couches) ; toutes = pas de filtre. */
+  typologiesPrix?: string[];
   zoneFeatures: GeoJSON.FeatureCollection;
   onMapClick: (lon: number, lat: number) => void;
   flyTo: [number, number] | null;
@@ -103,7 +106,7 @@ function bboxDe(fc: GeoJSON.FeatureCollection): [[number, number], [number, numb
   return Number.isFinite(minX) ? [[minX, minY], [maxX, maxY]] : null;
 }
 
-export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapClick, flyTo, rendu }: Props) {
+export default function MapView({ catalog, activeLayerIds, typologiesPrix, zoneFeatures, onMapClick, flyTo, rendu }: Props) {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const readyRef = useRef(false);
   const clickRef = useRef(onMapClick);
@@ -116,11 +119,17 @@ export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapCl
   activeRef.current = activeLayerIds;
   const renduArmeRef = useRef(false);
 
-  // Filtre de période de la carte des prix : bornes disponibles (min/max des ventes
-  // importées) et période choisie. null = toutes les ventes (tuiles précalculées).
+  // Filtres de la carte des prix : période (bornes = min/max des ventes importées,
+  // null = toutes) et typologies (panneau Couches). Sans aucun filtre, l'URL reste
+  // nue : tuiles précalculées, plus rapides.
   const [bornes, setBornes] = useState<{ min: string; max: string } | null>(null);
   const [periode, setPeriode] = useState<Periode>(null);
-  const prixSuffixe = periode ? `?debut=${periode.debut}&fin=${periode.fin}` : "";
+  const filtresPrix: string[] = [];
+  if (periode) filtresPrix.push(`debut=${periode.debut}`, `fin=${periode.fin}`);
+  if (typologiesPrix && typologiesPrix.length > 0 && typologiesPrix.length < TYPOLOGIE_ORDRE.length) {
+    filtresPrix.push(`typologies=${typologiesPrix.join(",")}`);
+  }
+  const prixSuffixe = filtresPrix.length ? `?${filtresPrix.join("&")}` : "";
   const prixSuffixeRef = useRef(prixSuffixe);
   prixSuffixeRef.current = prixSuffixe;
 
@@ -337,6 +346,9 @@ export default function MapView({ catalog, activeLayerIds, zoneFeatures, onMapCl
               )}
               <div className="prix-legende-note">
                 {periode ? `Ventes du ${frDate(periode.debut)} au ${frDate(periode.fin)}. ` : ""}
+                {typologiesPrix && typologiesPrix.length < TYPOLOGIE_ORDRE.length
+                  ? `Typologies : ${typologiesPrix.map((c) => TYPOLOGIE_LABELS[c] ?? c).join(", ")}. `
+                  : ""}
                 Maille selon le zoom : département → commune → section cadastrale → parcelle.
                 Aucune couleur = aucune vente connue.
               </div>

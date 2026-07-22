@@ -71,6 +71,15 @@ with sync_playwright() as pw:
     resultats["prix_tuiles_filtrees"] = sum("debut=2025-01-01" in u for u in tuiles_dvf)
     page.screenshot(path=f"{OUT}/4_prix_periode.png")
     page.click(".prix-periode-reset")
+    # Filtre typologique (panneau Couches) : décocher une typologie doit recharger
+    # les tuiles avec ?typologies=… (recalcul des médianes à la volée).
+    resultats["typo_filtre_visible"] = page.locator(".typo-filtre").is_visible()
+    tuiles_dvf.clear()
+    page.click("label[for='typo-residentiel']")
+    page.wait_for_timeout(1500)
+    page.wait_for_load_state("networkidle")
+    resultats["typo_tuiles_filtrees"] = sum("typologies=" in u for u in tuiles_dvf)
+    page.click("label[for='typo-residentiel']")  # tout réactiver avant la suite
     page.click("label:has-text('Prix au m² (ventes DVF)')")
 
     # --- Mode Parcelle : sélection → analyse → export Excel --------------------------
@@ -84,6 +93,8 @@ with sync_playwright() as pw:
     if bouton.is_enabled():
         bouton.click()
         page.wait_for_selector(".zone-resume", timeout=120_000)
+        # Typologies : libellés métier à l'écran, jamais les codes bruts (spec §5).
+        resultats["typologie_codes_bruts"] = page.get_by_text("tertiaire_non_qualifie").count()
         export = page.locator("button:has-text('Télécharger les transactions (Excel)')")
         export.scroll_into_view_if_needed()
         resultats["export_bouton_visible"] = export.is_visible()
@@ -124,8 +135,11 @@ ATTENDUS = {
     "radon_legende_classes": lambda v: v == 3,
     "radon_charge_s": lambda v: v < 15,
     "prix_tuiles_filtrees": lambda v: v >= 1,
+    "typo_filtre_visible": lambda v: v is True,
+    "typo_tuiles_filtrees": lambda v: v >= 1,
     "parcelle_bouton_grise_avant": lambda v: v is True,
     "parcelle_bouton_actif_apres": lambda v: v is True,
+    "typologie_codes_bruts": lambda v: v == 0,
     "export_bouton_visible": lambda v: v is True,
     "export_octets": lambda v: v > 5000,
     "toolbar_repliee": lambda v: v is True,

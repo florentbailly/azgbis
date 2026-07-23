@@ -70,7 +70,10 @@ cd backend ; .\.venv\Scripts\python.exe -m pytest  # tests unitaires
 
 ## Production
 
-`https://azgbis.baillylab.fr` (VPS OVH, Docker + Caddy, basic auth partagé).
-Mise à jour : `git pull` puis
-`docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build`.
+`https://azgbis.baillylab.fr` (VPS OVH ~40 Go tout compris, Docker + Caddy, basic
+auth partagé — temporairement désactivé depuis le 22/07/2026). Mise à jour, toujours
+la séquence complète (l'image ingest est derrière le profil `tools`, `up --build`
+ne la reconstruit pas) :
+`git pull`, `docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build`,
+`docker compose --profile tools build ingest`, `… run --rm ingest schema`.
 Je n'ai pas d'accès SSH au VPS : donner à l'utilisateur les commandes à exécuter.

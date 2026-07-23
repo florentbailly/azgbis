@@ -1,16 +1,32 @@
 # Déployer sur un VPS public (OVHcloud, Ubuntu) — pas à pas
 
-Ce guide déploie l'application complète (carte, analyse, rapports PDF) sur un VPS
-Ubuntu nu, en ~30 minutes de manipulations + 1 à 2 h d'imports de données sans
-surveillance. Il est écrit pour être suivi commande par commande.
+Ce guide couvre l'installation initiale (§1-7, ~30 min de manipulations), les imports
+de données (§8 : 1-2 h pour un département, 24-48 h pour la France métropolitaine),
+la recette (§9) et la maintenance (§10). Il est écrit pour être suivi commande par
+commande. Production actuelle : `https://azgbis.baillylab.fr` (VPS OVH,
+IP 51.210.46.150).
 
-**Ce qui sera en place à la fin** : l'application accessible en **HTTPS** sur le nom
-OVH du VPS, protégée par un **mot de passe partagé** (l'outil n'a pas de comptes
-individuels avant le lot 2 — sur un VPS public, sans cela, tout Internet y accéderait),
-les 4 conteneurs relancés automatiquement au démarrage de la machine.
+**Ce qui sera en place à la fin** : l'application accessible en **HTTPS**, protégée
+par un **mot de passe partagé** (l'outil n'a pas de comptes individuels avant le
+lot 2 — sur un VPS public, sans cela, tout Internet y accéderait), les 4 conteneurs
+relancés automatiquement au démarrage de la machine.
 
-Prérequis : un VPS OVH Ubuntu (≥ 4 Go RAM, ≥ 20 Go de disque libre : ~4 Go d'images,
-~2 Go de données, marge), son adresse IP, et l'accès SSH fourni par OVH.
+Prérequis : un VPS OVH Ubuntu (≥ 4 Go RAM ; disque : ≥ 20 Go libres pour un
+département, ~40 Go tout compris pour la France métropolitaine — voir §8), son
+adresse IP, et l'accès SSH fourni par OVH.
+
+**Règle d'or à retenir pour toute la suite** : l'image d'import `ingest` est derrière
+le profil Docker `tools`. `up -d --build` ne la reconstruit **jamais**. Après chaque
+`git pull`, avant tout import :
+
+```bash
+docker compose --profile tools build ingest
+docker compose --profile tools run --rm ingest schema   # idempotent, crée les tables manquantes
+```
+
+Symptôme typique de l'oubli : `ingest: error: argument cmd: invalid choice: 'xxx'`
+(l'image en service ne connaît pas encore la nouvelle commande), ou une erreur
+`relation … does not exist` (schéma pas à jour).
 
 ---
 
@@ -22,8 +38,8 @@ Le VPS clonera GitHub : ce qui n'est pas commité/poussé n'existera pas pour lu
 cd c:\Users\flore\azgbis
 git status          # voir ce qui part
 git add -A
-git commit -m "heatmap prix DVF + rapport PDF + deploiement VPS"
-git push
+git commit -m "description des changements"
+git -c http.sslBackend=schannel push   # le -c contourne le proxy SSL du poste
 ```
 
 ## 2. Se connecter au VPS et le mettre à jour
@@ -89,10 +105,13 @@ cd azgbis
 Trois secrets vivent dans un fichier `.env` à côté du compose — jamais commité
 (il est dans le `.gitignore`).
 
-1. **Nom DNS du VPS** : dans le manager OVH (ou `hostname -f` sur le VPS), de la forme
-   `vps-a1b2c3d4.vps.ovh.net`. Vérifier qu'il pointe bien vers l'IP :
+1. **Nom de domaine servi en HTTPS** (`SITE_ADDRESS`) : soit le nom OVH du VPS
+   (`vps-a1b2c3d4.vps.ovh.net`, visible dans le manager ou via `hostname -f`), soit
+   un domaine à vous — c'est le cas en production : `azgbis.baillylab.fr`, déclaré
+   chez le registrar par un enregistrement DNS **A** pointant vers l'IP du VPS.
+   Vérifier la résolution avant de continuer :
    ```bash
-   nslookup vps-a1b2c3d4.vps.ovh.net
+   nslookup azgbis.baillylab.fr    # doit répondre l'IP du VPS
    ```
 2. **Mot de passe base de données** (interne aux conteneurs, mais un vrai secret) :
    ```bash
@@ -115,12 +134,19 @@ Contenu (adapter les 4 valeurs, coller le hash tel quel, sans guillemets) :
 
 ```
 AZGBIS_DB_PASSWORD=le_resultat_de_openssl
-SITE_ADDRESS=vps-a1b2c3d4.vps.ovh.net
+SITE_ADDRESS=azgbis.baillylab.fr
 BASIC_AUTH_USER=azgbis
 BASIC_AUTH_HASH=$2a$14$le_hash_produit_par_caddy
 ```
 
 Enregistrer : `Ctrl+O`, `Entrée`, puis `Ctrl+X`.
+
+> **État temporaire (depuis le 22/07/2026)** : le mot de passe partagé est
+> **désactivé** — le bloc `basic_auth` est commenté dans `deploy/Caddyfile.vps`,
+> le site est donc ouvert à tout Internet. Pour le réactiver : décommenter le bloc,
+> commiter/pousser, puis sur le VPS `git pull` et
+> `docker compose -f docker-compose.yml -f docker-compose.vps.yml restart web`.
+> Les variables `BASIC_AUTH_*` du `.env` restent nécessaires dans les deux cas.
 
 ## 7. Construire et démarrer l'application
 
@@ -143,26 +169,51 @@ Dernier recours : ajouter `tls internal` sous `{$SITE_ADDRESS} {` dans
 `deploy/Caddyfile.vps` (certificat auto-signé : l'application fonctionne, le
 navigateur affiche un avertissement à accepter).
 
-## 8. Importer les données (~1 à 2 h)
+## 8. Importer les données
 
-`tmux` garde la session vivante même si votre SSH se coupe :
+### 8.0 Avant tout import : image et schéma à jour (obligatoire)
+
+C'est la « règle d'or » de l'introduction — l'oublier est la première cause de panne :
+
+```bash
+cd ~/azgbis
+docker compose --profile tools build ingest
+docker compose --profile tools run --rm ingest schema
+```
+
+`tmux` garde ensuite la session vivante même si votre SSH se coupe :
 
 ```bash
 sudo apt -y install tmux
-tmux new -s imports
+tmux new -s imports        # se détacher : Ctrl+B puis D ; revenir : tmux attach -t imports
 ```
 
-Puis, dans tmux (les commandes s'enchaînent seules grâce aux `&&`) :
+### 8.1 Ordre des imports et dépendances
+
+| Commande | Portée | Dépend de |
+|---|---|---|
+| `ingest dvf --dept N --years 2021-2025` | département | — |
+| `ingest contours --dept N` | département | `dvf` du même département |
+| `ingest bati --dept N` | département | `contours` du même département (ne garde que les bâtiments des parcelles vendues) |
+| `ingest sirene [--dept N …]` | tous les dépts DVF (ou liste) | `dvf` |
+| `ingest enrich` | toute la base | `contours` + `bati` + `sirene` |
+| `ingest admin`, `ingest radon`, `ingest inpn --famille …` | France entière, une seule fois | `admin` avant `radon` |
+
+Tous les imports sont **remplaçants et rejouables** : relancer une commande écrase
+proprement son périmètre, jamais d'état partiel.
+
+### 8.2 Un seul département (~1 à 2 h)
+
+Dans tmux (les commandes s'enchaînent grâce aux `&&`) :
 
 ```bash
-docker compose --profile tools run --rm ingest schema && \
 docker compose --profile tools run --rm ingest dvf --dept 69 --years 2021-2025 && \
 docker compose --profile tools run --rm ingest contours --dept 69 && \
-docker compose --profile tools run --rm ingest admin && \
-docker compose --profile tools run --rm ingest radon && \
 docker compose --profile tools run --rm ingest bati --dept 69 && \
 docker compose --profile tools run --rm ingest sirene && \
 docker compose --profile tools run --rm ingest enrich && \
+docker compose --profile tools run --rm ingest admin && \
+docker compose --profile tools run --rm ingest radon && \
 docker compose --profile tools run --rm ingest inpn --famille znieff1 && \
 docker compose --profile tools run --rm ingest inpn --famille znieff2 && \
 docker compose --profile tools run --rm ingest inpn --famille natura2000 && \
@@ -171,45 +222,62 @@ docker compose --profile tools run --rm ingest inpn --famille patrimoine_geol &&
 docker compose --profile tools run --rm ingest status
 ```
 
-Se détacher de tmux : `Ctrl+B` puis `D` (la session continue) ; y revenir :
-`tmux attach -t imports`. Ajouter d'autres départements = rejouer `ingest dvf`,
-`ingest contours` puis `ingest bati` avec le bon `--dept` (dans cet ordre — bati ne
-garde que les bâtiments des parcelles vendues), et refaire `ingest enrich`.
+Ajouter un département ensuite = `dvf` → `contours` → `bati` avec le bon `--dept`,
+puis `sirene` et `enrich` (les couches France entière ne sont pas à refaire).
 
-### France métropolitaine sur un VPS de 40 Go
+### 8.3 France métropolitaine (24-48 h, VPS 40 Go)
 
-Le pipeline est dimensionné pour tenir tout compris dans ~40 Go : DVF national
-≈ 9 Go, bâtiments filtrés ≈ 2 Go, SIRENE ≈ 1 Go, zonages/choroplèthes ≈ 0,5 Go,
-plus images Docker et système. Boucle type (24-48 h, dans tmux) :
+Budget disque tout compris ≈ 40 Go : DVF national ≈ 9 Go, bâtiments filtrés ≈ 2 Go,
+SIRENE ≈ 1 Go, zonages/choroplèthes ≈ 0,5 Go, images Docker ≈ 4-5 Go, système et
+marge. Surveiller avec `df -h /`. Dans tmux, après le §8.0 :
 
 ```bash
+# 1. Par département : DVF, cadastre, bâtiments (un échec n'arrête pas la boucle, il est journalisé)
 DEPTS="$(seq -w 1 19) 2A 2B $(seq 21 95)"
 for d in $DEPTS; do
   docker compose --profile tools run --rm ingest dvf --dept $d --years 2021-2025 && \
   docker compose --profile tools run --rm ingest contours --dept $d && \
   docker compose --profile tools run --rm ingest bati --dept $d || echo "$d" >> ~/imports-echecs.log
 done
-# SIRENE par lots de ~20 départements (4 Go de RAM : ne pas tout charger d'un coup)
+
+# 2. SIRENE par lots de ~20 départements (4 Go de RAM : ne pas tout charger d'un coup)
 for lot in "$(seq -w 1 19) 2A 2B" "$(seq 21 40)" "$(seq 41 60)" "$(seq 61 80)" "$(seq 81 95)"; do
   args=""; for d in $lot; do args="$args --dept $d"; done
   docker compose --profile tools run --rm ingest sirene $args
 done
-docker compose --profile tools run --rm ingest enrich
-cat ~/imports-echecs.log 2>/dev/null && echo "→ relancer ces départements"
+
+# 3. Couches France entière (une seule fois) + enrichissement + contrôle
+docker compose --profile tools run --rm ingest admin && \
+docker compose --profile tools run --rm ingest radon && \
+docker compose --profile tools run --rm ingest inpn --famille znieff1 && \
+docker compose --profile tools run --rm ingest inpn --famille znieff2 && \
+docker compose --profile tools run --rm ingest inpn --famille natura2000 && \
+docker compose --profile tools run --rm ingest inpn --famille espace_protege && \
+docker compose --profile tools run --rm ingest inpn --famille patrimoine_geol && \
+docker compose --profile tools run --rm ingest enrich && \
+docker compose --profile tools run --rm ingest status
+
+# 4. Départements en échec à rejouer (dvf → contours → bati) :
+sort -u ~/imports-echecs.log 2>/dev/null
 ```
 
 Si le disque se tend, le volume raw peut être purgé sans risque (tout est
 retéléchargeable ; les fichiers cadastre/DVF servent de cache d'import) :
-`docker run --rm -v azgbis_raw:/r alpine sh -c 'rm -rf /r/*'`.
+
+```bash
+docker run --rm -v azgbis_raw:/r alpine sh -c 'rm -rf /r/*'
+```
 
 ## 9. Recette
 
-1. Ouvrir `https://vps-a1b2c3d4.vps.ovh.net` → le navigateur demande
-   l'identifiant (`azgbis`) et le mot de passe partagé → la carte s'affiche.
-2. Activer les couches Environnement et « Prix au m² (ventes DVF) » → zonages verts
-   et choroplèthe violette visibles sur le Rhône.
+1. Ouvrir `https://azgbis.baillylab.fr` → la carte s'affiche (si le basic auth est
+   réactivé — voir §6 — le navigateur demande d'abord identifiant et mot de passe).
+2. Activer les couches Environnement, « Prix au m² (ventes DVF) » et « Potentiel
+   radon » → zonages verts, choroplèthe violette (avec filtres période et typologies),
+   choroplèthe radon fluide à l'échelle France.
 3. Rechercher « Place Bellecour Lyon », tracer un point + rayons, « Analyser la zone »
-   → les 5 thèmes répondent.
+   → les 5 thèmes répondent ; la section Marché affiche des typologies en toutes
+   lettres (« Bureaux », « Commerce »…) et propose l'export Excel.
 4. **Générer un rapport PDF** et l'ouvrir : les cartes doivent y figurer (c'est le
    test de l'écoute interne 8080).
 5. Test de robustesse : `sudo reboot`, attendre 2 minutes, se reconnecter,
@@ -217,23 +285,27 @@ retéléchargeable ; les fichiers cadastre/DVF servent de cache d'import) :
 
 ## 10. Maintenance courante
 
-- **Mettre à jour l'application** :
+- **Mettre à jour l'application** — séquence complète, toujours la même :
   ```bash
   cd ~/azgbis && git pull && \
-  docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build
+  docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build && \
+  docker compose --profile tools build ingest && \
+  docker compose --profile tools run --rm ingest schema
   ```
+  Les deux dernières lignes sont la « règle d'or » (§8.0) : sans elles, l'image
+  d'import reste l'ancienne et les nouvelles commandes/tables n'existent pas.
 - **Sauvegarde quotidienne de la base** (optionnelle — tout est reconstructible depuis
   l'open data, la sauvegarde raccourcit juste le délai de reprise) :
   ```bash
   docker compose exec postgis pg_dump -U azgbis -Fc azgbis > ~/azgbis-$(date +%F).dump
   ```
-- **Rafraîchir le DVF** (publications avril/octobre) : rejouer `ingest dvf` puis
-  `ingest contours` par département, puis `ingest enrich`.
+- **Rafraîchir le DVF** (publications avril/octobre) : par département, `ingest dvf`
+  puis `ingest contours` puis `ingest bati`, et un `ingest enrich` final.
 - **Rafraîchir la typologie** : `ingest bati --dept …` à chaque millésime BD TOPO
   (mars/juin/septembre/décembre), `ingest sirene` mensuel, puis `ingest enrich`.
+- **Réimport annuel** : `ingest admin` (millésime COG) puis `ingest radon` ;
+  `ingest inpn` semestriel.
 - Les rapports PDF sont purgés automatiquement après 24 h ; rien à faire.
-- Après un `git pull` qui touche `pipeline/` : `docker compose --profile tools build ingest`
-  avant les imports — `up --build` ignore les services derrière un profil.
 
 ## En cas de problème
 
@@ -242,6 +314,9 @@ retéléchargeable ; les fichiers cadastre/DVF servent de cache d'import) :
 | Page inaccessible | `docker compose ps` (tout Up ?), `sudo ufw status` (443 ouvert ?) |
 | Avertissement de certificat | `docker compose logs web` — délivrance en cours ou échouée (voir §7) |
 | Erreur 502 sur /api | `docker compose logs api` |
+| `ingest: error: … invalid choice: 'xxx'` | image d'import périmée — §8.0 (`--profile tools build ingest`) |
+| `relation "…" does not exist` pendant un import | schéma pas à jour — §8.0 (`ingest schema`) |
+| Disque plein pendant les imports | `df -h /`, purger le volume raw (§8.3), relancer le département en cours |
 | Thèmes « source non chargée » | imports du §8 non terminés — `ingest status` |
 | Rapport généré sans cartes | `docker compose logs worker` ; vérifier que `RENDER_URL` vaut `http://web:8080` (override VPS) |
 | Mot de passe refusé | régénérer le hash (§6) puis `docker compose ... up -d --force-recreate web` |

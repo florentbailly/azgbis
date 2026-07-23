@@ -261,12 +261,20 @@ docker compose --profile tools run --rm ingest status
 sort -u ~/imports-echecs.log 2>/dev/null
 ```
 
-Si le disque se tend, le volume raw peut être purgé sans risque (tout est
-retéléchargeable ; les fichiers cadastre/DVF servent de cache d'import) :
+**Disque saturé (`No space left on device`)** — récupérer de l'espace sans perdre de
+données (le volume raw n'est qu'un cache d'import ; tout est retéléchargeable) :
 
 ```bash
-docker run --rm -v azgbis_raw:/r alpine sh -c 'rm -rf /r/*'
+df -h /                                                    # constat
+docker run --rm -v azgbis_raw:/r alpine du -sh /r          # poids du cache d'import
+docker run --rm -v azgbis_raw:/r alpine sh -c 'rm -rf /r/*'   # purge du cache (sans risque)
+docker builder prune -af                                   # cache de build Docker
+docker compose exec postgis psql -U azgbis -d azgbis -c 'VACUUM FULL bati;'  # bloat des imports interrompus
+df -h /                                                    # vérifier l'espace regagné
 ```
+
+Puis reprendre le département en cours. `ingest bati` supprime désormais archive et
+gpkg même en cas d'échec : un import interrompu ne laisse plus de résidus.
 
 ## 9. Recette
 

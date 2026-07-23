@@ -73,8 +73,28 @@ def _extraire_gpkg(archive) -> str:
     return str(dest)
 
 
+# Bâtiment retenu : intersecte une parcelle vendue du département (l'index GIST de
+# contours sert de filtre). Appliqué par lot pour ne jamais matérialiser les ~900 000
+# bâtiments d'un département — seuls les quelques milliers utiles atterrissent dans bati.
+SQL_FILTRE_LOT = """
+    INSERT INTO bati (id_bdtopo, dept, usage_1, usage_2, nature,
+                      nb_logements, legere, source_id, geom)
+    SELECT t.id_bdtopo, %s, t.usage_1, t.usage_2, t.nature,
+           t.nb_logements, t.legere, %s, t.g
+    FROM (SELECT *, ST_Multi(ST_CollectionExtract(ST_MakeValid(
+                      ST_Force2D(ST_GeomFromWKB(wkb, 2154))), 3)) AS g
+          FROM bati_tmp) t
+    WHERE EXISTS (SELECT 1 FROM contours c
+                  WHERE c.niveau = 'parcelle' AND c.code LIKE %s
+                    AND c.geom && t.g AND ST_Intersects(c.geom, t.g))
+    ON CONFLICT (id_bdtopo) DO NOTHING
+"""
+
+
 def run(dept: str) -> None:
     import pyogrio
+    import shutil
+    from pathlib import Path
 
     conn = db()
     with conn.cursor() as cur:
@@ -88,70 +108,62 @@ def run(dept: str) -> None:
     millesime = nom.rsplit("_", 1)[1]
     archive = download(f"{TELECHARGEMENT}/{nom}/{nom}.7z", f"{nom}.7z")
     gpkg = _extraire_gpkg(archive)
-
-    info = pyogrio.read_info(gpkg, layer="batiment")
-    manquantes = [c for c in COLONNES if c not in info["fields"]]
-    if manquantes:
-        raise SystemExit(f"Colonnes absentes de la couche batiment : {manquantes} "
-                         f"(disponibles : {sorted(info['fields'])})")
-
-    source_id = register_source(
-        conn, "bdtopo", f"BD TOPO bâtiments (IGN) dépt {dept}",
-        f"{TELECHARGEMENT}/{nom}/{nom}.7z", millesime=millesime,
-    )
-    with conn.cursor() as cur:
-        cur.execute("""CREATE TEMP TABLE bati_tmp (id_bdtopo text, nature text,
-                       usage_1 text, usage_2 text, legere boolean, nb_logements int, wkb bytea)""")
-        total = 0
-        while True:
-            df = pyogrio.read_dataframe(
-                gpkg, layer="batiment", columns=COLONNES,
-                where="etat_de_l_objet = 'En service'",
-                skip_features=total, max_features=LOT,
-            )
-            if df.empty:
-                break
-            import pandas as pd
-            from shapely import to_wkb
-
-            with cur.copy("COPY bati_tmp FROM STDIN") as copy:
-                for r in df.itertuples():
-                    copy.write_row((
-                        r.cleabs, r.nature, r.usage_1, r.usage_2,
-                        None if pd.isna(r.construction_legere) else bool(r.construction_legere),
-                        None if pd.isna(r.nombre_de_logements) else int(r.nombre_de_logements),
-                        to_wkb(r.geometry),
-                    ))
-            total += len(df)
-            print(f"  bâtiments lus : {total}")
-            if len(df) < LOT:
-                break
-
-        # Import remplaçant en une transaction, restreint aux bâtiments intersectant
-        # une parcelle vendue (l'index GIST de contours sert de filtre) ; les bâtiments
-        # à cheval sur un département voisin déjà importé sont conservés (cleabs unique).
-        cur.execute("DELETE FROM bati WHERE dept = %s", (dept,))
-        cur.execute(
-            """INSERT INTO bati (id_bdtopo, dept, usage_1, usage_2, nature,
-                                 nb_logements, legere, source_id, geom)
-               SELECT t.id_bdtopo, %s, t.usage_1, t.usage_2, t.nature,
-                      t.nb_logements, t.legere, %s, t.g
-               FROM (SELECT *, ST_Multi(ST_CollectionExtract(ST_MakeValid(
-                                 ST_Force2D(ST_GeomFromWKB(wkb, 2154))), 3)) AS g
-                     FROM bati_tmp) t
-               WHERE EXISTS (SELECT 1 FROM contours c
-                             WHERE c.niveau = 'parcelle' AND c.code LIKE %s
-                               AND c.geom && t.g AND ST_Intersects(c.geom, t.g))
-               ON CONFLICT (id_bdtopo) DO NOTHING""",
-            (dept, source_id, dept + "%"),
-        )
-        print(f"  bati dépt {dept} : {cur.rowcount} bâtiments sur parcelles vendues "
-              f"(millésime {millesime})")
-    conn.commit()
-    conn.close()
-    # Archive et gpkg (~1 + 2 Go/département) supprimés : indispensables à l'échelle
-    # France sur un VPS de 40 Go ; ils seront retéléchargés au millésime suivant.
-    from pathlib import Path
-
-    Path(gpkg).unlink(missing_ok=True)
+    # L'archive ne sert plus une fois le gpkg extrait : la supprimer avant la phase base
+    # libère ~0,7 Go pendant la partie la plus gourmande (déterminant sur un VPS de 40 Go).
     Path(archive).unlink(missing_ok=True)
+
+    try:
+        info = pyogrio.read_info(gpkg, layer="batiment")
+        manquantes = [c for c in COLONNES if c not in info["fields"]]
+        if manquantes:
+            raise SystemExit(f"Colonnes absentes de la couche batiment : {manquantes} "
+                             f"(disponibles : {sorted(info['fields'])})")
+
+        source_id = register_source(
+            conn, "bdtopo", f"BD TOPO bâtiments (IGN) dépt {dept}",
+            f"{TELECHARGEMENT}/{nom}/{nom}.7z", millesime=millesime,
+        )
+        with conn.cursor() as cur:
+            cur.execute("""CREATE TEMP TABLE bati_tmp (id_bdtopo text, nature text,
+                           usage_1 text, usage_2 text, legere boolean, nb_logements int, wkb bytea)""")
+            # Import remplaçant en une transaction : purge du département, puis chaque
+            # lot lu du gpkg est filtré et inséré immédiatement (temp jamais > LOT lignes).
+            cur.execute("DELETE FROM bati WHERE dept = %s", (dept,))
+            total = 0
+            inseres = 0
+            while True:
+                df = pyogrio.read_dataframe(
+                    gpkg, layer="batiment", columns=COLONNES,
+                    where="etat_de_l_objet = 'En service'",
+                    skip_features=total, max_features=LOT,
+                )
+                if df.empty:
+                    break
+                import pandas as pd
+                from shapely import to_wkb
+
+                cur.execute("TRUNCATE bati_tmp")
+                with cur.copy("COPY bati_tmp FROM STDIN") as copy:
+                    for r in df.itertuples():
+                        copy.write_row((
+                            r.cleabs, r.nature, r.usage_1, r.usage_2,
+                            None if pd.isna(r.construction_legere) else bool(r.construction_legere),
+                            None if pd.isna(r.nombre_de_logements) else int(r.nombre_de_logements),
+                            to_wkb(r.geometry),
+                        ))
+                cur.execute(SQL_FILTRE_LOT, (dept, source_id, dept + "%"))
+                inseres += cur.rowcount
+                total += len(df)
+                print(f"  bâtiments lus : {total} (retenus : {inseres})")
+                if len(df) < LOT:
+                    break
+            print(f"  bati dépt {dept} : {inseres} bâtiments sur parcelles vendues "
+                  f"(millésime {millesime})")
+        conn.commit()
+    finally:
+        conn.close()
+        # Le gpkg (~2 Go) est un dérivé de l'archive : tout l'arbre d'extraction est
+        # supprimé (dossiers imbriqués du 7z compris) même en cas d'échec, sinon un
+        # import interrompu sature le disque au département suivant.
+        racine = RAW_DIR / Path(gpkg).relative_to(RAW_DIR).parts[0]
+        shutil.rmtree(racine, ignore_errors=True)
